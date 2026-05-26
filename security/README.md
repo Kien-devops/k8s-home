@@ -89,8 +89,9 @@ Open only from the server itself by default, or access securely over Tailscale:
 
 | Service | URL |
 |---|---|
-| SonarQube | `http://100.114.175.75:9000` |
-| Nexus | `http://100.114.175.75:8081` |
+| SonarQube | `https://sonar.teamdevops.shop` |
+| Nexus | `https://nexus.teamdevops.shop` |
+| Nexus Docker Registry | `100.112.150.56:8082` |
 
 To expose these services securely across your private network, utilize Tailscale or deploy Nginx/Caddy behind a local firewall.
 
@@ -142,7 +143,7 @@ Minimum policy:
 | Build | FE/BE compile successfully. |
 | SonarQube | Quality gate passes. |
 | Trivy | No unapproved HIGH/CRITICAL findings. |
-| Nexus | Images publish to the local Docker Registry (`100.114.175.75:8082`) with CI credentials. |
+| Nexus | Images publish to the local Docker Registry (`100.112.150.56:8082`) with CI credentials. |
 
 ## Documentation
 
