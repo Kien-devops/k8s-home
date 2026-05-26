@@ -317,11 +317,11 @@ jobs:
           DOCKERFILE
 
           # Build local Docker images
-          sudo docker build -t "ecr-fe:$IMAGE_TAG" -f "$ARTIFACT_DIR/Dockerfile.frontend" "$ARTIFACT_DIR"
-          sudo docker build -t "ecr-be:$IMAGE_TAG" -f "$ARTIFACT_DIR/Dockerfile.backend" "$ARTIFACT_DIR"
+          docker build -t "ecr-fe:$IMAGE_TAG" -f "$ARTIFACT_DIR/Dockerfile.frontend" "$ARTIFACT_DIR"
+          docker build -t "ecr-be:$IMAGE_TAG" -f "$ARTIFACT_DIR/Dockerfile.backend" "$ARTIFACT_DIR"
 
           # Scan local Docker images with Trivy before pushing
-          sudo docker run --rm \
+          docker run --rm \
             -v /var/run/docker.sock:/var/run/docker.sock \
             aquasec/trivy:0.56.2 image \
             --severity HIGH,CRITICAL \
@@ -329,7 +329,7 @@ jobs:
             --ignore-unfixed \
             "ecr-fe:$IMAGE_TAG"
 
-          sudo docker run --rm \
+          docker run --rm \
             -v /var/run/docker.sock:/var/run/docker.sock \
             aquasec/trivy:0.56.2 image \
             --severity HIGH,CRITICAL \
@@ -339,27 +339,27 @@ jobs:
 
           echo "Logging in to Nexus Docker Registry..."
           # Nexus password is passed as env var, login using stdin
-          echo "$NEXUS_AUTH" | base64 -d | cut -d: -f2 | sudo docker login --username "$NEXUS_USERNAME" --password-stdin "$NEXUS_DOCKER_REGISTRY"
+          echo "$NEXUS_AUTH" | base64 -d | cut -d: -f2 | docker login --username "$NEXUS_USERNAME" --password-stdin "$NEXUS_DOCKER_REGISTRY"
           
           echo "Pushing images to Nexus Docker Registry..."
-          sudo docker tag "ecr-fe:$IMAGE_TAG" "$NEXUS_DOCKER_REGISTRY/ecr-fe:$IMAGE_TAG"
-          sudo docker tag "ecr-be:$IMAGE_TAG" "$NEXUS_DOCKER_REGISTRY/ecr-be:$IMAGE_TAG"
-          sudo docker push "$NEXUS_DOCKER_REGISTRY/ecr-fe:$IMAGE_TAG"
-          sudo docker push "$NEXUS_DOCKER_REGISTRY/ecr-be:$IMAGE_TAG"
+          docker tag "ecr-fe:$IMAGE_TAG" "$NEXUS_DOCKER_REGISTRY/ecr-fe:$IMAGE_TAG"
+          docker tag "ecr-be:$IMAGE_TAG" "$NEXUS_DOCKER_REGISTRY/ecr-be:$IMAGE_TAG"
+          docker push "$NEXUS_DOCKER_REGISTRY/ecr-fe:$IMAGE_TAG"
+          docker push "$NEXUS_DOCKER_REGISTRY/ecr-be:$IMAGE_TAG"
 
           echo "Scanning pushed image from Nexus Docker Registry..."
-          sudo docker run --rm \
+          docker run --rm \
             -v /var/run/docker.sock:/var/run/docker.sock \
-            -v /root/.docker/config.json:/root/.docker/config.json \
+            -v $HOME/.docker/config.json:/root/.docker/config.json \
             aquasec/trivy:0.56.2 image \
             --severity HIGH,CRITICAL \
             --exit-code 1 \
             --ignore-unfixed \
             "$NEXUS_DOCKER_REGISTRY/ecr-fe:$IMAGE_TAG"
 
-          sudo docker run --rm \
+          docker run --rm \
             -v /var/run/docker.sock:/var/run/docker.sock \
-            -v /root/.docker/config.json:/root/.docker/config.json \
+            -v $HOME/.docker/config.json:/root/.docker/config.json \
             aquasec/trivy:0.56.2 image \
             --severity HIGH,CRITICAL \
             --exit-code 1 \
