@@ -1,0 +1,11 @@
+<distributionManagement>
+  <repository>
+    <id>maven-releases</id>
+    <url>https://nexus.example.com/repository/maven-releases/</url>
+  </repository>
+  <snapshotRepository>
+    <id>maven-snapshots</id>
+    <url>https://nexus.example.com/repository/maven-snapshots/</url>
+  </snapshotRepository>
+</distributionManagement>
+

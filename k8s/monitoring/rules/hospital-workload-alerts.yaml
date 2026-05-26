@@ -1,0 +1,48 @@
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: hospital-workload-alerts
+  namespace: monitoring
+  labels:
+    app.kubernetes.io/name: hospital-workload-alerts
+    app.kubernetes.io/part-of: monitoring
+spec:
+  groups:
+    - name: hospital.workloads
+      rules:
+        - alert: HospitalDeploymentUnavailable
+          expr: kube_deployment_status_replicas_unavailable{namespace=~"hospital|hospital-dev|hospital-stag|hospital-prod"} > 0
+          for: 5m
+          labels:
+            severity: warning
+          annotations:
+            summary: "Hospital deployment has unavailable replicas"
+            description: "Deployment {{ $labels.deployment }} in namespace {{ $labels.namespace }} has unavailable replicas for more than 5 minutes."
+
+        - alert: HospitalPodCrashLooping
+          expr: kube_pod_container_status_waiting_reason{namespace=~"hospital|hospital-dev|hospital-stag|hospital-prod",reason="CrashLoopBackOff"} > 0
+          for: 5m
+          labels:
+            severity: critical
+          annotations:
+            summary: "Hospital pod is crash looping"
+            description: "Pod {{ $labels.pod }} container {{ $labels.container }} in namespace {{ $labels.namespace }} is in CrashLoopBackOff."
+
+        - alert: HospitalContainerRestarting
+          expr: increase(kube_pod_container_status_restarts_total{namespace=~"hospital|hospital-dev|hospital-stag|hospital-prod"}[15m]) > 3
+          for: 5m
+          labels:
+            severity: warning
+          annotations:
+            summary: "Hospital container restarted repeatedly"
+            description: "Container {{ $labels.container }} in pod {{ $labels.pod }} restarted more than 3 times in 15 minutes."
+
+        - alert: HospitalPodNotReady
+          expr: kube_pod_status_ready{namespace=~"hospital|hospital-dev|hospital-stag|hospital-prod",condition="false"} == 1
+          for: 10m
+          labels:
+            severity: warning
+          annotations:
+            summary: "Hospital pod is not ready"
+            description: "Pod {{ $labels.pod }} in namespace {{ $labels.namespace }} has not been ready for more than 10 minutes."
+

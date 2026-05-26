@@ -1,0 +1,6 @@
+sonar.projectKey=hospital-frontend
+sonar.projectName=Hospital Frontend
+sonar.sources=hospital_FE/src
+sonar.exclusions=**/node_modules/**,**/dist/**,**/build/**
+sonar.sourceEncoding=UTF-8
+

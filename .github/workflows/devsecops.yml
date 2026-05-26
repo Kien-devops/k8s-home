@@ -1,0 +1,405 @@
+name: DevSecOps CI/CD
+
+on:
+  push:
+    branches:
+      - main
+      - devops
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+env:
+  DOTNET_VERSION: "9.0.x"
+  NODE_VERSION: "20"
+  BACKEND_PROJECT: hospital_BE/Hospital_API/Hospital_API.csproj
+  FRONTEND_DIR: hospital_FE
+  REPO_DIR: /home/monitor/k8s-onprem
+  REPO_URL: https://github.com/Kien-devops/k8s-onprem.git
+  NEXUS_DOCKER_REGISTRY: 100.112.150.56:8082
+  BUILDER_HOST: 100.112.150.56
+  IMAGE_TAG: ${{ github.sha }}
+  BRANCH_NAME: ${{ github.ref_name }}
+  K8S_ENV: ${{ github.ref_name == 'main' && 'prod' || github.ref_name == 'stag' && 'stag' || 'dev' }}
+  K8S_OVERLAY: k8s/overlays/${{ github.ref_name == 'main' && 'prod' || github.ref_name == 'stag' && 'stag' || 'dev' }}
+  K8S_KUSTOMIZATION: k8s/overlays/${{ github.ref_name == 'main' && 'prod' || github.ref_name == 'stag' && 'stag' || 'dev' }}/kustomization.yaml
+  NEXUS_RAW_REPOSITORY: hospital-artifacts
+  NEXUS_NUGET_REPOSITORY: nuget-group
+  NEXUS_NPM_REPOSITORY: npm-group
+  BACKEND_ARTIFACT: backend-${{ github.sha }}.zip
+  FRONTEND_ARTIFACT: frontend-${{ github.sha }}.zip
+
+jobs:
+  security-gates:
+    name: Trivy and SonarQube Gates
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    if: "${{ github.event_name != 'push' || !contains(github.event.head_commit.message, 'ci: update image tag') }}"
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Connect to Tailscale
+        uses: tailscale/github-action@v2
+        with:
+          authkey: ${{ secrets.TAILSCALE_AUTH_KEY }}
+          tags: tag:aaa
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: ${{ env.DOTNET_VERSION }}
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: hospital_FE/package-lock.json
+
+      - name: Configure Nexus dependency cache
+        shell: bash
+        env:
+          NEXUS_URL: ${{ secrets.NEXUS_URL }}
+          NEXUS_USERNAME: ${{ secrets.NEXUS_USERNAME }}
+          NEXUS_PASSWORD: ${{ secrets.NEXUS_PASSWORD }}
+        run: |
+          set -euo pipefail
+
+          for value in NEXUS_URL NEXUS_USERNAME NEXUS_PASSWORD; do
+            if [ -z "${!value:-}" ]; then
+              echo "$value is required to restore dependencies through Nexus."
+              exit 1
+            fi
+          done
+          NEXUS_URL="${NEXUS_URL%/}"
+
+          dotnet nuget remove source nuget.org || true
+          dotnet nuget add source "${NEXUS_URL}/repository/${NEXUS_NUGET_REPOSITORY}/index.json" \
+            --name nexus-nuget \
+            --username "$NEXUS_USERNAME" \
+            --password "$NEXUS_PASSWORD" \
+            --store-password-in-clear-text \
+            --allow-insecure-connections
+
+          NPM_REGISTRY="${NEXUS_URL}/repository/${NEXUS_NPM_REPOSITORY}/"
+          NPM_AUTH=$(printf '%s' "${NEXUS_USERNAME}:${NEXUS_PASSWORD}" | base64 | tr -d '\n')
+          NPM_HOST_PATH="${NPM_REGISTRY#http://}"
+          NPM_HOST_PATH="${NPM_HOST_PATH#https://}"
+
+          {
+            echo "registry=${NPM_REGISTRY}"
+            echo "//${NPM_HOST_PATH}:_auth=${NPM_AUTH}"
+            echo "always-auth=true"
+          } > "${FRONTEND_DIR}/.npmrc"
+
+      - name: Restore backend dependencies through Nexus
+        run: dotnet restore "${{ env.BACKEND_PROJECT }}"
+
+      - name: Install frontend dependencies through Nexus
+        working-directory: ${{ env.FRONTEND_DIR }}
+        run: npm ci
+
+      - name: SonarQube code quality scan
+        shell: bash
+        env:
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+          SONAR_HOST_URL: ${{ secrets.SONAR_HOST_URL }}
+        run: |
+          set -euo pipefail
+
+          if [ -z "$SONAR_TOKEN" ] || [ -z "$SONAR_HOST_URL" ]; then
+            echo "SonarQube secrets are not configured. Skipping analysis."
+            exit 0
+          fi
+
+          dotnet tool install --global dotnet-sonarscanner
+          export PATH="$PATH:$HOME/.dotnet/tools"
+
+          dotnet sonarscanner begin \
+            /k:"k8s-onprem" \
+            /d:sonar.host.url="$SONAR_HOST_URL" \
+            /d:sonar.token="$SONAR_TOKEN" \
+            /d:sonar.exclusions="hospital_FE/public/js/plugins.js"
+
+          dotnet build "${{ env.BACKEND_PROJECT }}" --configuration Release --no-restore
+
+          dotnet sonarscanner end /d:sonar.token="$SONAR_TOKEN"
+
+      - name: Trivy filesystem and dependency scan
+        uses: aquasecurity/trivy-action@v0.36.0
+        with:
+          scan-type: fs
+          scan-ref: .
+          severity: HIGH,CRITICAL
+          exit-code: "1"
+          ignore-unfixed: false
+
+
+      - name: Build backend
+        run: dotnet build "${{ env.BACKEND_PROJECT }}" --configuration Release --no-restore
+
+      - name: Lint frontend
+        working-directory: ${{ env.FRONTEND_DIR }}
+        run: npm run lint
+
+      - name: Build frontend
+        working-directory: ${{ env.FRONTEND_DIR }}
+        run: npm run build
+
+      - name: Package backend artifact
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p artifacts/backend
+          dotnet publish "${{ env.BACKEND_PROJECT }}" --configuration Release --no-restore -o artifacts/backend
+          (cd artifacts/backend && zip -qr "../${BACKEND_ARTIFACT}" .)
+
+      - name: Package frontend artifact
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p artifacts/frontend
+          cp -R "${FRONTEND_DIR}/dist" artifacts/frontend/dist
+          cp "${FRONTEND_DIR}/nginx.conf" artifacts/frontend/nginx.conf
+          (cd artifacts/frontend && zip -qr "../${FRONTEND_ARTIFACT}" .)
+
+      - name: Upload artifacts to Nexus
+        shell: bash
+        env:
+          NEXUS_URL: ${{ secrets.NEXUS_URL }}
+          NEXUS_USERNAME: ${{ secrets.NEXUS_USERNAME }}
+          NEXUS_PASSWORD: ${{ secrets.NEXUS_PASSWORD }}
+        run: |
+          set -euo pipefail
+
+          for value in NEXUS_URL NEXUS_USERNAME NEXUS_PASSWORD; do
+            if [ -z "${!value:-}" ]; then
+              echo "$value is required to publish artifacts to Nexus."
+              exit 1
+            fi
+          done
+          NEXUS_URL="${NEXUS_URL%/}"
+
+          curl -fsS -u "${NEXUS_USERNAME}:${NEXUS_PASSWORD}" \
+            --upload-file "artifacts/${BACKEND_ARTIFACT}" \
+            "${NEXUS_URL}/repository/${NEXUS_RAW_REPOSITORY}/${BRANCH_NAME}/${BACKEND_ARTIFACT}"
+
+          curl -fsS -u "${NEXUS_USERNAME}:${NEXUS_PASSWORD}" \
+            --upload-file "artifacts/${FRONTEND_ARTIFACT}" \
+            "${NEXUS_URL}/repository/${NEXUS_RAW_REPOSITORY}/${BRANCH_NAME}/${FRONTEND_ARTIFACT}"
+
+  build-push-deploy:
+    name: Build, Push, and Update GitOps
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    needs:
+      - security-gates
+    if: "${{ github.event_name != 'push' || !contains(github.event.head_commit.message, 'ci: update image tag') }}"
+
+    steps:
+      - name: Connect to Tailscale
+        uses: tailscale/github-action@v2
+        with:
+          authkey: ${{ secrets.TAILSCALE_AUTH_KEY }}
+          tags: tag:aaa
+
+      - name: Nexus repository check
+        shell: bash
+        env:
+          NEXUS_URL: ${{ secrets.NEXUS_URL }}
+          NEXUS_USERNAME: ${{ secrets.NEXUS_USERNAME }}
+          NEXUS_PASSWORD: ${{ secrets.NEXUS_PASSWORD }}
+        run: |
+          set -euo pipefail
+
+          for value in NEXUS_URL NEXUS_USERNAME NEXUS_PASSWORD; do
+            if [ -z "${!value:-}" ]; then
+              echo "$value is required to download build artifacts from Nexus."
+              exit 1
+            fi
+          done
+          NEXUS_URL="${NEXUS_URL%/}"
+
+          curl -fsS -u "${NEXUS_USERNAME}:${NEXUS_PASSWORD}" "$NEXUS_URL/service/rest/v1/status" >/dev/null
+
+      - name: Verify Builder SSH access (via Tailscale SSH)
+        shell: bash
+        run: |
+          set -euo pipefail
+          ssh -o BatchMode=yes \
+            -o StrictHostKeyChecking=no \
+            "monitor@${{ env.BUILDER_HOST }}" \
+            "echo 'Builder SSH authentication via Tailscale SSH succeeded'"
+
+      - name: Build and push images on Builder
+        shell: bash
+        env:
+          GIT_USERNAME: ${{ secrets.GIT_USERNAME }}
+          GIT_PASSWORD: ${{ secrets.GIT_PASSWORD }}
+          NEXUS_URL: ${{ secrets.NEXUS_URL }}
+          NEXUS_USERNAME: ${{ secrets.NEXUS_USERNAME }}
+          NEXUS_PASSWORD: ${{ secrets.NEXUS_PASSWORD }}
+          NEXUS_DOCKER_REGISTRY: ${{ env.NEXUS_DOCKER_REGISTRY }}
+        run: |
+          set -euo pipefail
+
+          NEXUS_URL="${NEXUS_URL%/}"
+          GIT_AUTH=$(printf '%s' "${GIT_USERNAME}:${GIT_PASSWORD}" | base64 | tr -d '\n')
+          NEXUS_AUTH=$(printf '%s' "${NEXUS_USERNAME}:${NEXUS_PASSWORD}" | base64 | tr -d '\n')
+
+          ssh -o BatchMode=yes \
+            -o StrictHostKeyChecking=no \
+            "monitor@${{ env.BUILDER_HOST }}" \
+            "GIT_AUTH='${GIT_AUTH}' NEXUS_AUTH='${NEXUS_AUTH}' NEXUS_URL='${NEXUS_URL}' NEXUS_RAW_REPOSITORY='${NEXUS_RAW_REPOSITORY}' BACKEND_ARTIFACT='${BACKEND_ARTIFACT}' FRONTEND_ARTIFACT='${FRONTEND_ARTIFACT}' REPO_DIR='${REPO_DIR}' REPO_URL='${REPO_URL}' NEXUS_DOCKER_REGISTRY='${NEXUS_DOCKER_REGISTRY}' IMAGE_TAG='${IMAGE_TAG}' BRANCH_NAME='${BRANCH_NAME}' /bin/bash -s" <<'EOF'
+          set -euo pipefail
+
+          command -v docker >/dev/null 2>&1 || { echo "docker is not installed on Builder"; exit 1; }
+          command -v git >/dev/null 2>&1 || { echo "git is not installed on Builder"; exit 1; }
+          command -v unzip >/dev/null 2>&1 || { echo "unzip is not installed on Builder"; exit 1; }
+
+          if [ ! -d "$REPO_DIR/.git" ]; then
+            rm -rf "$REPO_DIR"
+            git -c http.extraHeader="Authorization: Basic $GIT_AUTH" clone -b "$BRANCH_NAME" "$REPO_URL" "$REPO_DIR"
+          else
+            cd "$REPO_DIR"
+            git remote set-url origin "$REPO_URL"
+            git -c http.extraHeader="Authorization: Basic $GIT_AUTH" fetch origin "$BRANCH_NAME"
+            git reset --hard "origin/$BRANCH_NAME"
+          fi
+
+          cd "$REPO_DIR"
+
+          ARTIFACT_DIR="/tmp/hospital-artifacts-$IMAGE_TAG"
+          rm -rf "$ARTIFACT_DIR"
+          mkdir -p "$ARTIFACT_DIR/backend" "$ARTIFACT_DIR/frontend"
+
+          curl -fsS \
+            -H "Authorization: Basic ${NEXUS_AUTH}" \
+            -o "$ARTIFACT_DIR/$BACKEND_ARTIFACT" \
+            "$NEXUS_URL/repository/$NEXUS_RAW_REPOSITORY/$BRANCH_NAME/$BACKEND_ARTIFACT"
+
+          curl -fsS \
+            -H "Authorization: Basic ${NEXUS_AUTH}" \
+            -o "$ARTIFACT_DIR/$FRONTEND_ARTIFACT" \
+            "$NEXUS_URL/repository/$NEXUS_RAW_REPOSITORY/$BRANCH_NAME/$FRONTEND_ARTIFACT"
+
+          unzip -q "$ARTIFACT_DIR/$BACKEND_ARTIFACT" -d "$ARTIFACT_DIR/backend"
+          unzip -q "$ARTIFACT_DIR/$FRONTEND_ARTIFACT" -d "$ARTIFACT_DIR/frontend"
+
+          cat > "$ARTIFACT_DIR/Dockerfile.backend" <<'DOCKERFILE'
+          FROM mcr.microsoft.com/dotnet/aspnet:9.0
+          RUN apt-get update && \
+              apt-get upgrade -y && \
+              rm -rf /var/lib/apt/lists/*
+          WORKDIR /app
+          ENV ASPNETCORE_URLS=http://+:8080
+          COPY backend/ .
+          USER app
+          EXPOSE 8080
+          CMD ["dotnet", "Hospital_API.dll"]
+          DOCKERFILE
+
+          cat > "$ARTIFACT_DIR/Dockerfile.frontend" <<'DOCKERFILE'
+          FROM nginx:1.27-alpine
+          RUN apk upgrade --no-cache && \
+              touch /var/run/nginx.pid && \
+              chown -R nginx:nginx /var/run/nginx.pid /var/cache/nginx /var/log/nginx /etc/nginx/conf.d
+          WORKDIR /usr/share/nginx/html
+          COPY frontend/dist ./
+          COPY frontend/nginx.conf /etc/nginx/conf.d/default.conf
+          USER nginx
+          EXPOSE 8000
+          DOCKERFILE
+
+          # Build local Docker images
+          sudo docker build -t "ecr-fe:$IMAGE_TAG" -f "$ARTIFACT_DIR/Dockerfile.frontend" "$ARTIFACT_DIR"
+          sudo docker build -t "ecr-be:$IMAGE_TAG" -f "$ARTIFACT_DIR/Dockerfile.backend" "$ARTIFACT_DIR"
+
+          # Scan local Docker images with Trivy before pushing
+          sudo docker run --rm \
+            -v /var/run/docker.sock:/var/run/docker.sock \
+            aquasec/trivy:0.56.2 image \
+            --severity HIGH,CRITICAL \
+            --exit-code 1 \
+            --ignore-unfixed \
+            "ecr-fe:$IMAGE_TAG"
+
+          sudo docker run --rm \
+            -v /var/run/docker.sock:/var/run/docker.sock \
+            aquasec/trivy:0.56.2 image \
+            --severity HIGH,CRITICAL \
+            --exit-code 1 \
+            --ignore-unfixed \
+            "ecr-be:$IMAGE_TAG"
+
+          echo "Logging in to Nexus Docker Registry..."
+          # Nexus password is passed as env var, login using stdin
+          echo "$NEXUS_AUTH" | base64 -d | cut -d: -f2 | sudo docker login --username "$NEXUS_USERNAME" --password-stdin "$NEXUS_DOCKER_REGISTRY"
+          
+          echo "Pushing images to Nexus Docker Registry..."
+          sudo docker tag "ecr-fe:$IMAGE_TAG" "$NEXUS_DOCKER_REGISTRY/ecr-fe:$IMAGE_TAG"
+          sudo docker tag "ecr-be:$IMAGE_TAG" "$NEXUS_DOCKER_REGISTRY/ecr-be:$IMAGE_TAG"
+          sudo docker push "$NEXUS_DOCKER_REGISTRY/ecr-fe:$IMAGE_TAG"
+          sudo docker push "$NEXUS_DOCKER_REGISTRY/ecr-be:$IMAGE_TAG"
+
+          echo "Scanning pushed image from Nexus Docker Registry..."
+          sudo docker run --rm \
+            -v /var/run/docker.sock:/var/run/docker.sock \
+            -v /root/.docker/config.json:/root/.docker/config.json \
+            aquasec/trivy:0.56.2 image \
+            --severity HIGH,CRITICAL \
+            --exit-code 1 \
+            --ignore-unfixed \
+            "$NEXUS_DOCKER_REGISTRY/ecr-fe:$IMAGE_TAG"
+
+          sudo docker run --rm \
+            -v /var/run/docker.sock:/var/run/docker.sock \
+            -v /root/.docker/config.json:/root/.docker/config.json \
+            aquasec/trivy:0.56.2 image \
+            --severity HIGH,CRITICAL \
+            --exit-code 1 \
+            --ignore-unfixed \
+            "$NEXUS_DOCKER_REGISTRY/ecr-be:$IMAGE_TAG"
+
+          # Clean up local builds
+          rm -rf "$ARTIFACT_DIR"
+          EOF
+
+      - name: Checkout repo to update manifests
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ env.BRANCH_NAME }}
+
+      - name: Update image tag and registry name in k8s manifests
+        shell: bash
+        run: |
+          set -euo pipefail
+          
+          TARGET_REGISTRY="${{ env.NEXUS_DOCKER_REGISTRY }}"
+
+          echo "Updating ${K8S_ENV} Kubernetes overlay at ${K8S_KUSTOMIZATION} with registry: ${TARGET_REGISTRY}"
+          
+          # Dynamically replace newName and newTag matching by name prefix
+          sed -i "/name: .*ecr-fe/{n;s|newName: .*|newName: ${TARGET_REGISTRY}/ecr-fe|;n;s|newTag: .*|newTag: ${IMAGE_TAG}|;}" "$K8S_KUSTOMIZATION"
+          sed -i "/name: .*ecr-be/{n;s|newName: .*|newName: ${TARGET_REGISTRY}/ecr-be|;n;s|newTag: .*|newTag: ${IMAGE_TAG}|;}" "$K8S_KUSTOMIZATION"
+
+      - name: Commit and push updated manifests
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add "$K8S_KUSTOMIZATION"
+
+          if git diff --cached --quiet; then
+            echo "No manifest image tag or registry changes to commit."
+            exit 0
+          fi
+
+          git commit -m "ci: update image tag to ${IMAGE_TAG}"
+          git push origin "$BRANCH_NAME"

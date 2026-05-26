@@ -1,0 +1,13 @@
+# Create an internal ClusterIP Service for backend pods.
+apiVersion: v1
+kind: Service
+metadata:
+  name: be-service-v1
+  namespace: hospital
+spec:
+  selector:
+    app: be-v1
+  ports:
+    - protocol: TCP
+      port: 80
+      targetPort: 8080

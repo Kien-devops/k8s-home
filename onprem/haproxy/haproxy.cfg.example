@@ -1,0 +1,37 @@
+global
+    log stdout format raw local0
+    maxconn 4096
+    master-worker
+
+defaults
+    log global
+    timeout connect 5s
+    timeout client 50s
+    timeout server 50s
+
+frontend http_front
+    bind *:80
+    mode http
+    option httplog
+    option forwardfor
+    http-request redirect scheme https code 301
+
+frontend https_front
+    bind *:443 ssl crt /usr/local/etc/haproxy/certs/benhvien.teamdevops.shop.pem
+    mode http
+    option httplog
+    option forwardfor
+    http-request set-header X-Forwarded-Proto https
+    http-request set-header X-Forwarded-Port 443
+    http-request set-header X-Forwarded-Host %[req.hdr(Host)]
+    http-request set-header X-Real-IP %[src]
+    default_backend traefik_nodes_http
+
+backend traefik_nodes_http
+    mode http
+    balance roundrobin
+    option tcp-check
+    # Replace these IPs with Kubernetes worker node IPs that run Traefik.
+    # Do not route to the control-plane node unless Traefik is explicitly scheduled there.
+    server worker1 10.0.1.11:30080 check
+    server worker2 10.0.1.12:30080 check

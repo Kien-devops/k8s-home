@@ -1,0 +1,63 @@
+# Default deny all ingress traffic in the rendered hospital namespace
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: default-deny-ingress
+  namespace: hospital
+spec:
+  podSelector: {}
+  policyTypes:
+  - Ingress
+
+---
+# Allow traffic from traefik to frontend
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-traefik-to-fe
+  namespace: hospital
+spec:
+  podSelector:
+    matchLabels:
+      app: fe-v1
+  policyTypes:
+  - Ingress
+  ingress:
+  - from:
+    - namespaceSelector:
+        matchLabels:
+          kubernetes.io/metadata.name: traefik
+      podSelector:
+        matchLabels:
+          app: traefik
+    ports:
+    - protocol: TCP
+      port: 8000
+
+---
+# Allow traffic from frontend and traefik to backend
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-fe-traefik-to-be
+  namespace: hospital
+spec:
+  podSelector:
+    matchLabels:
+      app: be-v1
+  policyTypes:
+  - Ingress
+  ingress:
+  - from:
+    - namespaceSelector:
+        matchLabels:
+          kubernetes.io/metadata.name: traefik
+      podSelector:
+        matchLabels:
+          app: traefik
+    - podSelector:
+        matchLabels:
+          app: fe-v1
+    ports:
+    - protocol: TCP
+      port: 8080

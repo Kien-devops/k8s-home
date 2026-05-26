@@ -1,0 +1,131 @@
+# Run the hospital backend API from the ECR image.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: be-deployment-v1
+  namespace: hospital
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: be-v1
+  template:
+    metadata:
+      labels:
+        app: be-v1
+    spec:
+      imagePullSecrets:
+        - name: ecr-registry-secret
+
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+            - weight: 100
+              podAffinityTerm:
+                labelSelector:
+                  matchLabels:
+                    app: be-v1
+                topologyKey: kubernetes.io/hostname
+
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1654
+        fsGroup: 2000
+
+      volumes:
+        - name: be-uploads
+          emptyDir: {}
+
+      initContainers:
+        - name: init-uploads-permission
+          image: busybox:1.36
+          command:
+            - sh
+            - -c
+            - |
+              mkdir -p /uploads/images
+          volumeMounts:
+            - name: be-uploads
+              mountPath: /uploads
+          securityContext:
+            runAsUser: 1654
+            runAsNonRoot: true
+            runAsGroup: 2000
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop:
+                - ALL
+
+      containers:
+        - name: be-v1
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop:
+                - ALL
+
+          image: 606030503959.dkr.ecr.us-east-1.amazonaws.com/ecr-be:ea729165289e467954dc42f2cb0bc3597dc841c4
+          imagePullPolicy: Always
+
+          env:
+            - name: ConnectionStrings__DefaultConnection
+              valueFrom:
+                secretKeyRef:
+                  name: be-db-secret
+                  key: default-connection
+            - name: REDIS_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: be-redis-secret
+                  key: password
+            - name: HOST_IP
+              valueFrom:
+                fieldRef:
+                  fieldPath: status.hostIP
+            - name: ConnectionStrings__Redis
+              value: $(HOST_IP):6379,password=$(REDIS_PASSWORD),abortConnect=false
+            - name: Jwt__Secret
+              valueFrom:
+                secretKeyRef:
+                  name: be-jwt-secret
+                  key: secret
+            - name: Jwt__Issuer
+              value: HospitalAPI
+            - name: Jwt__Audience
+              value: HospitalClient
+
+          ports:
+            - containerPort: 8080
+
+          volumeMounts:
+            - name: be-uploads
+              mountPath: /app/wwwroot/uploads
+
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: 8080
+            periodSeconds: 10
+
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: 8080
+            periodSeconds: 20
+
+          startupProbe:
+            httpGet:
+              path: /healthz
+              port: 8080
+            periodSeconds: 5
+            failureThreshold: 18
+
+          resources:
+            requests:
+              cpu: 250m
+              memory: 384Mi
+            limits:
+              cpu: "1"
+              memory: 768Mi

@@ -1,0 +1,50 @@
+# Terraform
+**/.terraform/
+.terraform.lock.hcl
+*.tfstate
+*.tfstate.*
+*.tfvars
+!*.tfvars.example
+tfplan
+*.tfplan
+*.plan
+*.out
+backend.hcl
+!backend.hcl.example
+crash.log
+crash.*.log
+terraform.log
+*.tfstate.lock.info
+override.tf
+override.tf.json
+*_override.tf
+*_override.tf.json
+# Build outputs
+bin/
+obj/
+node_modules/
+dist/
+build/
+
+# Local secrets
+.env
+**/.env
+.env.*
+**/.env.*
+security/.env
+security/sonarqube/.env
+security/nexus/.env
+security/trivy/.env
+!.env.example
+!**/.env.example
+k8s/secrets/default-connection.txt
+k8s/secrets/*.secret
+!k8s/secrets/*.example
+
+# OS and editors
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+.mcp.json
+.code-review-graph/

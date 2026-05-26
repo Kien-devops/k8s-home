@@ -1,0 +1,48 @@
+global
+    log stdout format raw local0
+    maxconn 4096
+    master-worker
+
+defaults
+    log global
+    timeout connect 5s
+    timeout client 50s
+    timeout server 50s
+
+frontend http_front
+    bind *:80
+    mode http
+    option httplog
+    option forwardfor
+{{- if env "HAPROXY_TLS_CERT" }}
+    http-request redirect scheme https code 301
+{{- else }}
+    default_backend traefik_nodes_http
+{{- end }}
+
+{{- if env "HAPROXY_TLS_CERT" }}
+frontend https_front
+    bind *:443 ssl crt {{ env "HAPROXY_TLS_CERT" }}
+    mode http
+    option httplog
+    option forwardfor
+    http-request set-header X-Forwarded-Proto https
+    http-request set-header X-Forwarded-Port 443
+    http-request set-header X-Forwarded-Host %[req.hdr(Host)]
+    http-request set-header X-Real-IP %[src]
+    default_backend traefik_nodes_http
+{{- end }}
+
+backend traefik_nodes_http
+    mode http
+    balance roundrobin
+    option tcp-check
+{{- $nodes := service "traefik-nodeport" }}
+{{- if $nodes }}
+{{- range $index, $node := $nodes }}
+    server {{ $node.Node }} {{ $node.Address }}:{{ $node.Port }} check
+{{- end }}
+{{- else }}
+    # No healthy Kubernetes worker nodes are currently registered in Consul.
+    server no-ready-traefik-node 127.0.0.1:9 disabled
+{{- end }}

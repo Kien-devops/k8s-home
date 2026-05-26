@@ -1,0 +1,7 @@
+.env
+certs/*.pem
+!certs/.gitkeep
+generated/*
+!generated/.gitkeep
+kubeconfig/*
+!kubeconfig/.gitkeep

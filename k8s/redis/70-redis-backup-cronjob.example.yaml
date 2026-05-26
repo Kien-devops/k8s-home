@@ -1,0 +1,78 @@
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: redis-backup-to-s3
+  namespace: hospital-prod
+  labels:
+    app.kubernetes.io/name: redis
+    app.kubernetes.io/component: backup
+    app.kubernetes.io/part-of: hospital
+spec:
+  schedule: "0 */6 * * *"
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      template:
+        spec:
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 1000
+            runAsGroup: 1000
+            fsGroup: 1000
+          restartPolicy: OnFailure
+          containers:
+            - name: backup
+              image: example.com/redis-backup-tools:latest
+              securityContext:
+                allowPrivilegeEscalation: false
+                readOnlyRootFilesystem: true
+                capabilities:
+                  drop:
+                    - ALL
+              command:
+                - sh
+                - -c
+                - |
+                  set -eu
+                  BACKUP_FILE="/tmp/redis-${POD_NAMESPACE}-$(date -u +%Y%m%dT%H%M%SZ).rdb"
+                  redis-cli -h redis-primary -p 6379 -a "${REDIS_PASSWORD}" --rdb "${BACKUP_FILE}"
+                  aws s3 cp "${BACKUP_FILE}" "s3://${S3_BUCKET}/redis/${POD_NAMESPACE}/"
+              env:
+                - name: POD_NAMESPACE
+                  valueFrom:
+                    fieldRef:
+                      fieldPath: metadata.namespace
+                - name: REDIS_PASSWORD
+                  valueFrom:
+                    secretKeyRef:
+                      name: redis-auth-secret
+                      key: password
+                - name: S3_BUCKET
+                  valueFrom:
+                    secretKeyRef:
+                      name: redis-backup-s3-secret
+                      key: bucket
+                - name: AWS_ACCESS_KEY_ID
+                  valueFrom:
+                    secretKeyRef:
+                      name: redis-backup-s3-secret
+                      key: access-key-id
+                      optional: true
+                - name: AWS_SECRET_ACCESS_KEY
+                  valueFrom:
+                    secretKeyRef:
+                      name: redis-backup-s3-secret
+                      key: secret-access-key
+                      optional: true
+                - name: AWS_DEFAULT_REGION
+                  valueFrom:
+                    secretKeyRef:
+                      name: redis-backup-s3-secret
+                      key: region
+              volumeMounts:
+                - name: tmp
+                  mountPath: /tmp
+          volumes:
+            - name: tmp
+              emptyDir: {}

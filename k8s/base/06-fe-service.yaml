@@ -1,0 +1,14 @@
+# Create an internal ClusterIP Service for frontend pods.
+apiVersion: v1
+kind: Service
+metadata:
+  name: fe-service-v1
+  namespace: hospital
+spec:
+  selector:
+    app: fe-v1
+  ports:
+  - protocol: TCP
+    port: 80
+    # Target container port is 8000 because nginx runs as non-root
+    targetPort: 8000
