@@ -35,8 +35,15 @@ To optimize cache lookup performance and eliminate latency overhead, Redis is de
 
 ## Storage
 
-This cache implementation uses node-local storage. Pods mount an **`emptyDir`** volume (`/data`) for volatile storage.
+This cache implementation uses node-local persistent storage. Pods mount a **`hostPath`** volume mapping to `/var/lib/redis-data` on the host machine.
 This design removes dependencies on cloud-specific block storage (such as AWS EBS gp3) or external PersistentVolumeClaims, making it fully self-managed and compliant with on-premises infrastructure.
+
+> [!IMPORTANT]
+> Since the Redis container runs as non-root user `999` (governed by Kyverno cluster policies), you must pre-create the directory on each host node and assign ownership permissions to GID/UID `999` before deploying:
+> ```bash
+> sudo mkdir -p /var/lib/redis-data
+> sudo chown -R 999:999 /var/lib/redis-data
+> ```
 
 ## Create The Redis Secret
 

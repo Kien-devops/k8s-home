@@ -121,4 +121,6 @@ spec:
         - name: tmp
           emptyDir: {}
         - name: redis-data
-          emptyDir: {}
+          hostPath:
+            path: /var/lib/redis-data
+            type: DirectoryOrCreate
