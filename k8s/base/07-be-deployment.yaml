@@ -1,4 +1,4 @@
-# Run the hospital backend API from the ECR image.
+# Run the hospital backend API from the Nexus Docker Registry.
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -15,7 +15,7 @@ spec:
         app: be-v1
     spec:
       imagePullSecrets:
-        - name: ecr-registry-secret
+        - name: nexus-registry-secret
 
       affinity:
         podAntiAffinity:
@@ -66,7 +66,7 @@ spec:
               drop:
                 - ALL
 
-          image: 606030503959.dkr.ecr.us-east-1.amazonaws.com/ecr-be:ea729165289e467954dc42f2cb0bc3597dc841c4
+          image: 100.112.150.56:8082/ecr-be:latest
           imagePullPolicy: Always
 
           env:
