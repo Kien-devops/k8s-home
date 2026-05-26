@@ -281,8 +281,8 @@ Main flow:
 9. On Monitor VM: clone/fetch the repo, download artifacts from Nexus, and build Docker images.
 10. Scan Docker images with Trivy. The job fails on HIGH or CRITICAL findings.
 11. Push images to the internal Nexus registry:
-    - `100.114.175.75:8082/hospital_fe:<github.sha>`
-    - `100.114.175.75:8082/hospital_be:<github.sha>`
+    - `100.112.150.56:8082/ecr-fe:<github.sha>`
+    - `100.112.150.56:8082/ecr-be:<github.sha>`
 12. Update image tags in `k8s/base`.
 13. Argo CD detects the Git change and syncs it to the on-premise Kubernetes cluster.
 14. Cluster security, monitoring, and logging continue running as GitOps-managed platform services.
@@ -327,7 +327,7 @@ Local workstation & On-Premise cluster:
 
 DevSecOps services (Hosted internally):
 
-- Nexus Repository Manager (`100.114.175.75:8081` / Registry port `8082`)
+- Nexus Repository Manager (`100.112.150.56:8081` / Registry port `8082`)
 - SonarQube Community
 - Trivy CLI
 
@@ -370,8 +370,8 @@ Default local endpoints:
 
 | Tool | URL | Purpose |
 |---|---|---|
-| SonarQube | `http://100.114.175.75:9000` | Static analysis and quality gates. |
-| Nexus | `http://100.114.175.75:8081` | Artifact repository and dependency cache. |
+| SonarQube | `http://100.112.150.56:9000` | Static analysis and quality gates. |
+| Nexus | `http://100.112.150.56:8081` | Artifact repository and dependency cache. |
 
 Required Nexus repositories:
 
@@ -434,30 +434,43 @@ Required secrets:
 
 ## Nexus and Argo CD Setup
 
-Create the namespace and configure the database and Redis secrets in Kubernetes:
+Create the namespace and configure all required secrets in Kubernetes:
+
+> **NOTE**: The External Secrets Operator (ESO) is installed via ArgoCD but is
+> **not actively syncing secrets** on the on-prem cluster. Secrets are created
+> manually using `kubectl`. When AWS credentials are configured on the cluster
+> (via IAM role or access key), enable ESO by uncommenting the ExternalSecret
+> resources in `k8s/base/kustomization.yaml`.
 
 ```bash
 export K8S_NAMESPACE=hospital-prod
 
 kubectl create namespace $K8S_NAMESPACE
 
-# Create database secret
+# 1. Database connection string
 kubectl create secret generic be-db-secret \
   -n $K8S_NAMESPACE \
-  --from-literal=default-connection="Server=YOUR_DB_IP;Database=hospital;User Id=sa;Password=YOUR_PASSWORD;TrustServerCertificate=True;"
+  --from-literal=default-connection="Server=YOUR_DB_IP;Database=HospitalDB;User Id=sa;Password=YOUR_PASSWORD;TrustServerCertificate=True;"
 
-# Create Redis password secret
+# 2. Redis password for backend (must match redis-auth-secret)
+kubectl create secret generic be-redis-secret \
+  -n $K8S_NAMESPACE \
+  --from-literal=password='<redis-password>'
+
+# 3. JWT signing key
+kubectl create secret generic be-jwt-secret \
+  -n $K8S_NAMESPACE \
+  --from-literal=secret='<jwt-secret-key>'
+
+# 4. Redis auth (used by the Redis DaemonSet)
 kubectl create secret generic redis-auth-secret \
   -n $K8S_NAMESPACE \
-  --from-literal=password='<strong-password>'
-```
+  --from-literal=password='<redis-password>'
 
-Create the image pull secret to authenticate against the internal Nexus Docker Registry:
-
-```bash
+# 5. Nexus image pull secret
 kubectl create secret docker-registry nexus-registry-secret \
   -n $K8S_NAMESPACE \
-  --docker-server=100.114.175.75:8082 \
+  --docker-server=100.112.150.56:8082 \
   --docker-username=<nexus-username> \
   --docker-password=<nexus-password>
 ```
@@ -509,10 +522,16 @@ Before rerunning the workflow, confirm:
 - The build host is registered on the Tailscale tailnet with host name `monitor`.
 - The build host has Tailscale SSH enabled.
 - The build host has `git`, `docker`, and `unzip`.
+- The build host user (`monitor`) is in the `docker` group.
 - Nexus Docker registry is listening on port `8082` and reachable from the cluster and build host.
+- CRI-O on all cluster nodes trusts the Nexus registry (`/etc/containers/registries.conf.d/100-nexus.conf`).
+- Calico uses the correct interface (`IP_AUTODETECTION_METHOD=cidr=192.168.1.0/24`).
 - GitHub secrets exist and contain the correct values.
 - `GIT_PASSWORD` is a valid GitHub PAT with repository write access to update manifests.
-- Kubernetes has `be-db-secret`, `redis-auth-secret` and `nexus-registry-secret`.
+- `SONAR_TOKEN` is a valid **Project Analysis Token** (not a User token).
+- Kubernetes has all 5 required secrets: `be-db-secret`, `be-redis-secret`, `be-jwt-secret`, `redis-auth-secret`, `nexus-registry-secret`.
+- Redis data directory exists on worker nodes: `/var/lib/redis-data` owned by `999:999`.
+- ArgoCD NetworkPolicies are deleted (bare-metal clusters).
 - Argo CD watches the same branch/path that the workflow updates (`devops` branch).
 
 ## Troubleshooting
@@ -527,6 +546,14 @@ Before rerunning the workflow, confirm:
 | `nexus-registry-secret` not found | ImagePullBackOff on pods | Verify that the image pull secret was created in the correct namespace (`hospital-prod`). |
 | Argo CD does not sync | Branch/path mismatch or app unhealthy | Check `argocd/hospital-traefik-app.yaml`, app status, and repo credentials. |
 | Workflow loops repeatedly | Manifest update commit retriggers pipeline | Keep the skip guard for `ci: update image tag`. |
+| Calico cross-node DNS timeout | Calico selects Tailscale interface instead of LAN | `kubectl set env ds/calico-node -n kube-system IP_AUTODETECTION_METHOD="cidr=192.168.1.0/24"` |
+| ArgoCD Redis `i/o timeout` | Default NetworkPolicies block internal traffic | `kubectl delete networkpolicy --all -n argocd` then restart deployments. |
+| Redis `Permission denied` on start | hostPath `/var/lib/redis-data` wrong ownership | `sudo chown -R 999:999 /var/lib/redis-data` on worker nodes. |
+| BE `CreateContainerConfigError` | Missing Kubernetes secrets | Create `be-db-secret`, `be-redis-secret`, `be-jwt-secret` in `hospital-prod`. |
+| CRI-O `ImagePullBackOff` for Nexus | CRI-O does not trust HTTP registry | Add `/etc/containers/registries.conf.d/100-nexus.conf` with `insecure = true`. |
+| SonarQube `not authorized to run analysis` | Token lacks Execute Analysis permission | Generate a **Project Analysis Token** in SonarQube UI, update `SONAR_TOKEN` secret. |
+| Docker `sudo` errors in CI SSH | SSH user not in docker group | `sudo usermod -aG docker monitor && newgrp docker` on build host. |
+| NodePort not accessible externally | Firewall or kube-proxy issue | Use `kubectl port-forward` as workaround: `kubectl port-forward svc/argocd-server -n argocd 8443:443 --address 0.0.0.0` |
 
 ## Security Practices Used
 

@@ -1,106 +1,163 @@
-# ArgoCD Setup Guide
+# ArgoCD Setup Guide (On-Premise)
 
-Run these commands on the Kubernetes control server where `kubectl` already works.
+Run these commands on the Kubernetes control plane node (node1) where `kubectl` works.
 
 ## 1. Check Cluster Access
 
 ```bash
-kubectl get nodes
+kubectl get nodes -o wide
 ```
 
 ## 2. Install ArgoCD
 
 ```bash
 kubectl create namespace argocd
-```
-
-```bash
 kubectl apply -n argocd \
   -f https://raw.githubusercontent.com/argoproj/argo-cd/stable/manifests/install.yaml
 ```
 
-Check ArgoCD pods:
+Wait for all pods to be ready:
 
 ```bash
+kubectl wait --for=condition=Ready pods --all -n argocd --timeout=120s
 kubectl get pods -n argocd
 ```
 
-## 3. Access ArgoCD UI
+## 3. Fix ArgoCD NetworkPolicy (On-Premise)
 
-Run this command and keep the terminal open:
+> **IMPORTANT**: ArgoCD's default NetworkPolicies block internal DNS and Redis
+> communication on bare-metal clusters. Delete them immediately after install:
 
 ```bash
-kubectl port-forward svc/argocd-server -n argocd 8080:443 --address 0.0.0.0
+kubectl delete networkpolicy --all -n argocd
 ```
 
-Open:
+If ArgoCD pods show DNS timeout errors (`argocd-redis: i/o timeout`), restart:
 
-```text
-https://<server-public-ip>:8080
+```bash
+kubectl rollout restart deployment -n argocd
+kubectl rollout restart statefulset -n argocd
 ```
 
-## 4. Get Admin Password
+## 4. Expose ArgoCD UI
+
+### Option A: Port-Forward (recommended for Tailscale access)
+
+```bash
+kubectl port-forward svc/argocd-server -n argocd 8443:443 --address 0.0.0.0 &
+```
+
+Access: `https://<tailscale-ip>:8443`
+
+### Option B: NodePort
+
+```bash
+kubectl patch svc argocd-server -n argocd -p '{
+  "spec": {
+    "type": "NodePort",
+    "ports": [
+      {"port": 80, "targetPort": 8080, "nodePort": 31080, "name": "http"},
+      {"port": 443, "targetPort": 8080, "nodePort": 30444, "name": "https"}
+    ]
+  }
+}'
+sudo ufw allow 30444/tcp
+```
+
+Access: `https://<node-ip>:30444`
+
+> **NOTE**: If Calico cross-node routing is broken (NodePort times out),
+> use port-forward instead. See k8s/SETUP.md for Calico fix.
+
+## 5. Get Admin Password
 
 ```bash
 kubectl get secret argocd-initial-admin-secret -n argocd \
   -o jsonpath="{.data.password}" | base64 -d && echo
 ```
 
-Login with:
+Login: `admin` / `<password-from-command>`
 
-```text
-username: admin
-password: <password-from-command>
-```
+## 6. Install Gateway API CRDs
 
-## 5. Check Required CRDs
-
-The project uses Kubernetes Gateway API and Traefik Middleware CRDs.
+Required before syncing the hospital app:
 
 ```bash
-kubectl get crd gateways.gateway.networking.k8s.io
-kubectl get crd middlewares.traefik.io
+kubectl apply -f https://github.com/kubernetes-sigs/gateway-api/releases/download/v1.3.0/standard-install.yaml
 ```
 
-If either CRD is missing, install the required Gateway API and Traefik CRDs before syncing the app.
-
-## 6. Create ArgoCD Application
-
-Apply the Application manifest from this folder:
+## 7. Deploy All ArgoCD Applications
 
 ```bash
+# Core hospital app
 kubectl apply -f argocd/hospital-traefik-app.yaml
+kubectl apply -f argocd/redis-app.yaml
+kubectl apply -f argocd/storage-app.yaml
+
+# Monitoring (Prometheus + Grafana + Alertmanager)
+kubectl apply -f argocd/monitoring/
+
+# Logging (Loki + Promtail)
+kubectl apply -f argocd/logging/
+
+# Security (Kyverno, Trivy Operator, Falco, ESO)
+kubectl apply -f argocd/security/
 ```
 
-Or paste the content of `hospital-traefik-app.yaml` into the ArgoCD UI with `+ New App` using YAML mode.
-
-## 7. Sync and Verify
-
-Check the Application:
+## 8. Verify All Apps
 
 ```bash
-kubectl get application hospital-traefik-app -n argocd
+kubectl get application -n argocd
 ```
 
-Check application workloads:
+Expected: 13 applications, all `Synced` and `Healthy`.
+
+| App | Source |
+|---|---|
+| hospital-traefik-app | `k8s/overlays/prod` |
+| redis | `k8s/redis` |
+| storage | `k8s/storage` |
+| kube-prometheus-stack | Helm chart |
+| monitoring-rules | `k8s/monitoring` |
+| loki | Helm chart |
+| promtail | Helm chart |
+| logging-config | `k8s/logging` |
+| kyverno | Helm chart |
+| security-namespace-policies | `k8s/security` |
+| external-secrets | Helm chart |
+| trivy-operator | Helm chart |
+| falco | Helm chart |
+
+## 9. Verify Workloads
 
 ```bash
-kubectl get pods -n hospital
+kubectl get pods -n hospital-prod
+kubectl get pods -n monitoring
+kubectl get pods -n logging
+kubectl get pods -n security
 kubectl get pods -n traefik
-kubectl get svc -n traefik
-kubectl get gateway,httproute -n hospital
 ```
 
-Open the hospital app:
+## 10. Access Hospital App
 
-```text
-http://<server-public-ip>:30080
+```bash
+# Via Traefik NodePort
+http://<node-ip>:30080
 ```
 
-## 8. Notes
+## Troubleshooting
+
+| Symptom | Fix |
+|---|---|
+| ArgoCD Redis `i/o timeout` | Delete NetworkPolicies: `kubectl delete networkpolicy --all -n argocd` |
+| ArgoCD UI not accessible via NodePort | Use port-forward: `kubectl port-forward svc/argocd-server -n argocd 8443:443 --address 0.0.0.0` |
+| Apps stuck on `Unknown` sync status | Wait 2-3 min for ArgoCD to reconcile, or click REFRESH in UI |
+| CRD errors (ServiceMonitor, ClusterPolicy) | These auto-resolve when ArgoCD installs the Helm charts (Prometheus, Kyverno) |
+| `ApplicationSet` error in logs | Safe to ignore if not using ApplicationSets |
+
+## Notes
 
 - Git is the source of truth. Long-term changes should be committed and pushed to GitHub.
 - If a pod is deleted manually, Kubernetes recreates it through its Deployment.
 - If a Deployment, Service, Gateway, or Route is deleted manually, ArgoCD recreates it when `selfHeal` is enabled.
 - If a manifest is removed from Git, ArgoCD deletes the live resource when `prune` is enabled.
-
