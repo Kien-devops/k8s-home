@@ -15,8 +15,8 @@ env:
   NODE_VERSION: "20"
   BACKEND_PROJECT: hospital_BE/Hospital_API/Hospital_API.csproj
   FRONTEND_DIR: hospital_FE
-  REPO_DIR: /home/monitor/k8s-onprem
-  REPO_URL: https://github.com/Kien-devops/k8s-onprem.git
+  REPO_DIR: /home/monitor/k8s-home
+  REPO_URL: https://github.com/Kien-devops/k8s-home.git
   NEXUS_DOCKER_REGISTRY: 100.112.150.56:8082
   BUILDER_HOST: 100.112.150.56
   IMAGE_TAG: ${{ github.sha }}
@@ -121,7 +121,7 @@ jobs:
           export PATH="$PATH:$HOME/.dotnet/tools"
 
           dotnet sonarscanner begin \
-            /k:"k8s-onprem" \
+            /k:"k8s-home" \
             /d:sonar.host.url="$SONAR_HOST_URL" \
             /d:sonar.token="$SONAR_TOKEN" \
             /d:sonar.exclusions="hospital_FE/public/js/plugins.js"

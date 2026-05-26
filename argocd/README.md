@@ -149,7 +149,7 @@ k8s/security, k8s/monitoring, and k8s/logging          = configure those tools a
 
 | Setting | Value |
 |---|---|
-| Repository | `https://github.com/Kien-devops/k8s-onprem.git` |
+| Repository | `https://github.com/Kien-devops/k8s-home.git` |
 | Target revision | `devops` |
 | Manifest path | `k8s/overlays/prod` |
 | Destination server | `https://kubernetes.default.svc` |

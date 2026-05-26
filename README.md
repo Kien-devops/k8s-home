@@ -411,9 +411,7 @@ Verify the build host:
 git --version
 docker --version
 ```
-
-Ensure the repository is cloned on the host at `/home/tailscale-ssh-user/k8s-onprem` (or the configured `REPO_DIR`).
-
+Ensure the repository is cloned on the host at `/home/monitor/k8s-home` (or the configured `REPO_DIR`).
 ## GitHub Actions Secrets
 
 Configure secrets in:

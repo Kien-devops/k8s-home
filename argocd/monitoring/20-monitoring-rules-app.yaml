@@ -6,7 +6,7 @@ metadata:
 spec:
   project: default
   source:
-    repoURL: https://github.com/Kien-devops/k8s-onprem.git
+    repoURL: https://github.com/Kien-devops/k8s-home.git
     targetRevision: main
     path: k8s/monitoring
   destination:
