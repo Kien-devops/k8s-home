@@ -15,6 +15,7 @@ rules:
       - namespaces
       - services
       - endpoints
+      - secrets
     verbs:
       - get
       - list
@@ -45,6 +46,7 @@ rules:
       - gateways/status
       - httproutes/status
     verbs:
+      - get
       - patch
       - update
   - apiGroups:
