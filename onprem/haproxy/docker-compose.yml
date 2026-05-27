@@ -37,6 +37,7 @@ services:
     image: ${CONSUL_TEMPLATE_IMAGE:-hashicorp/consul-template:latest}
     container_name: ${CONSUL_TEMPLATE_CONTAINER_NAME:-haproxy-consul-template}
     restart: unless-stopped
+    user: "0:0"
     depends_on:
       - consul
       - haproxy

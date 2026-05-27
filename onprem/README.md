@@ -4,6 +4,7 @@ This folder provides the on-premise ingress path for the hospital platform, repl
 
 ```text
 Internet / Client
+  -> Cloudflare Tunnel / DNS
   -> HAProxy Edge Server, ports 80/443
   -> Consul-backed dynamic HAProxy backend discovery
   -> Kubernetes worker NodePort 30080
@@ -21,7 +22,9 @@ Internet / Client
 
 ## Ingress Architecture
 
-All traffic enters the network through the HAProxy load balancer on the Edge Server. The Edge Server uses a Kubernetes discovery container to poll active nodes in the cluster, dynamically registers them as backends, and passes traffic to the Traefik NodePort.
+All public traffic enters through Cloudflare Tunnel or DNS and lands on the HAProxy load balancer on the Edge Server. In the Cloudflare Tunnel setup, the public hostname `benhvien.teamdevops.shop` points to `http://127.0.0.1:80` on the HAProxy server. HAProxy then forwards traffic to healthy Traefik NodePort backends discovered from Kubernetes nodes.
+
+The Edge Server uses a Kubernetes discovery container to poll Ready nodes in the cluster, registers each node as a Consul service, and relies on Consul TCP health checks to keep only reachable Traefik NodePort backends in the generated HAProxy config. In a small control-plane plus worker cluster, the control-plane node may be discovered but filtered out by health checks if Traefik is only scheduled on the worker.
 
 > [!IMPORTANT]
 > The legacy AWS EKS and Terraform cloud infrastructure paths have been deprecated. This on-premises dynamic ingress architecture is the standard method for routing incoming traffic to the services.
@@ -59,15 +62,24 @@ kubectl apply -f onprem/traefik/10-app-gateway-routes.example.yaml
 ```bash
 cd onprem/haproxy
 cp .env.example .env
-# Place a kubeconfig with node discovery permissions (get/list/watch nodes) at kubeconfig/config.
+# Set KUBECONFIG_PATH to the read-only discovery kubeconfig on the Edge Server.
 docker compose up -d
+```
+
+For the current on-prem edge host, `.env` should contain:
+
+```env
+KUBECONFIG_PATH=/etc/haproxy/edge-node-discovery.kubeconfig
+TRAEFIK_NODEPORT=30080
+NODE_ADDRESS_TYPE=InternalIP
 ```
 
 ## Requirements
 
 | Requirement | Notes |
 |---|---|
-| DNS | Point your domain to the HAProxy host public IP. |
+| DNS | Either point DNS to the HAProxy host public IP, or publish the hostname through Cloudflare Tunnel. |
+| Cloudflare Tunnel | Public hostname `benhvien.teamdevops.shop` should target `http://127.0.0.1:80` when `cloudflared` runs on the HAProxy host. |
 | HAProxy inbound | Open TCP `80` and `443` to user traffic. |
 | Worker inbound | Open TCP `30080` from the HAProxy host to Kubernetes workers. |
 | Kubernetes API | The Edge Server kubeconfig must reach the Kubernetes API and read nodes. |
@@ -79,10 +91,12 @@ docker compose up -d
 ```bash
 kubectl -n traefik get ds,svc,pods -o wide
 kubectl get gateway,httproute -A
-curl -I http://<your-domain>
-curl -IL https://<your-domain>
-docker compose -f onprem/haproxy/docker-compose.yml logs k8s-discovery
+curl -I https://benhvien.teamdevops.shop/
+curl -i https://benhvien.teamdevops.shop/api/User/test
+curl -i https://benhvien.teamdevops.shop/api/Doctor
+cd onprem/haproxy
+docker compose logs --tail=50 k8s-discovery
 docker exec haproxy-alb haproxy -c -f /usr/local/etc/haproxy/generated/haproxy.cfg
 ```
 
-HAProxy handles SSL termination and redirects HTTP to HTTPS. Traefik remains HTTP-only behind HAProxy.
+With Cloudflare Tunnel, Cloudflare terminates public HTTPS and forwards HTTP to HAProxy locally. HAProxy and Traefik remain HTTP-only behind Cloudflare unless `HAPROXY_TLS_CERT` is explicitly configured.

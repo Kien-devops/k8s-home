@@ -126,7 +126,15 @@ If `dotnet ef` is not installed:
 dotnet tool install --global dotnet-ef
 ```
 
-Database-related endpoints such as `/api/Branch` require a working SQL Server connection. The lightweight `/api/User/test` endpoint is useful for checking routing without proving database connectivity.
+Database-related endpoints such as `/api/Branch` and `/api/Doctor` require a working SQL Server connection. The lightweight `/api/User/test` endpoint is useful for checking routing without proving database connectivity.
+
+For SQL Server TLS, use the exact keyword:
+
+```text
+TrustServerCertificate=True
+```
+
+Do not use misspelled variants such as `TrustServerCertifesicate`; `Microsoft.Data.SqlClient` will reject the connection string and database-backed endpoints will return `500`.
 
 ## Docker
 
@@ -177,8 +185,8 @@ Create the database secret:
 cp k8s/secrets/default-connection.txt.example k8s/secrets/default-connection.txt
 vi k8s/secrets/default-connection.txt
 
-kubectl apply -f k8s/overlays/dev/namespace.yaml
-kubectl -n hospital-dev create secret generic be-db-secret \
+kubectl apply -f k8s/overlays/prod/namespace.yaml
+kubectl -n hospital-prod create secret generic be-db-secret \
   --from-file=default-connection=k8s/secrets/default-connection.txt \
   --dry-run=client -o yaml | kubectl apply -f -
 ```
@@ -188,8 +196,8 @@ kubectl -n hospital-dev create secret generic be-db-secret \
 Restart backend after secret changes:
 
 ```bash
-kubectl -n hospital-dev rollout restart deployment/be-deployment-v1
-kubectl -n hospital-dev rollout status deployment/be-deployment-v1
+kubectl -n hospital-prod rollout restart deployment/be-deployment-v1
+kubectl -n hospital-prod rollout status deployment/be-deployment-v1
 ```
 
 ## Public API Tests
@@ -209,7 +217,7 @@ curl -i https://benhvien.teamdevops.shop/api/Doctor
 Port-forward the service:
 
 ```bash
-kubectl -n hospital-dev port-forward svc/be-service-v1 8080:80
+kubectl -n hospital-prod port-forward svc/be-service-v1 8080:80
 ```
 
 Then check backend-only endpoints:
@@ -222,19 +230,19 @@ curl -i http://localhost:8080/swagger/v1/swagger.json
 Inspect logs:
 
 ```bash
-kubectl -n hospital-dev logs deployment/be-deployment-v1 -c be-v1 --tail=100
+kubectl -n hospital-prod logs deployment/be-deployment-v1 -c be-v1 --tail=100
 ```
 
 Inspect environment injection:
 
 ```bash
-kubectl -n hospital-dev get deploy be-deployment-v1 -o yaml | grep -A8 "ConnectionStrings__DefaultConnection"
+kubectl -n hospital-prod get deploy be-deployment-v1 -o yaml | grep -A8 "ConnectionStrings__DefaultConnection"
 ```
 
 Check the secret value:
 
 ```bash
-kubectl -n hospital-dev get secret be-db-secret -o jsonpath='{.data.default-connection}' | base64 -d
+kubectl -n hospital-prod get secret be-db-secret -o jsonpath='{.data.default-connection}' | base64 -d
 echo
 ```
 
@@ -245,6 +253,7 @@ echo
 | `/healthz` fails in Kubernetes | Pod logs, container port `8080`, probe path. |
 | `/api/User/test` fails publicly | HAProxy, Traefik route, backend service endpoints. |
 | `/api/User/test` works but data endpoints fail | SQL connection string, SQL firewall, database credentials, migrations. |
+| Log says `Keyword not supported: 'trustservercertifesicate'` | Fix the DB secret to use `TrustServerCertificate=True`, then restart `be-deployment-v1`. |
 | JWT-protected endpoints return 401 | JWT issuer, audience, secret, token expiry, stored token revocation logic. |
 | Uploads fail | `/app/wwwroot/uploads` volume permissions and init container logs. |
 | Swagger URL wrong behind proxy | Forwarded headers, `X-Forwarded-Proto`, public route rules. |
