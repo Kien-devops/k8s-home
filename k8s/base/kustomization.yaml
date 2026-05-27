@@ -8,6 +8,3 @@ resources:
   - 10-network-policy.yaml
   - 11-fe-hpa.yaml
   - 12-be-hpa.yaml
-  # ExternalSecret resources (requires ESO CRDs - uncomment when ESO is installed)
-  # - be-db-externalsecret.yaml
-  # - ecr-registry-externalsecret.yaml
