@@ -81,7 +81,7 @@ spec:
                   name: be-redis-secret
                   key: password
             - name: ConnectionStrings__Redis
-              value: hospital-redis-ha-haproxy:6379,password=$(REDIS_PASSWORD),abortConnect=false
+              value: hospital-redis-ha:6379,password=$(REDIS_PASSWORD),abortConnect=false
             - name: Jwt__Secret
               valueFrom:
                 secretKeyRef:
