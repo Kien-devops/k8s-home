@@ -80,12 +80,8 @@ spec:
                 secretKeyRef:
                   name: be-redis-secret
                   key: password
-            - name: HOST_IP
-              valueFrom:
-                fieldRef:
-                  fieldPath: status.hostIP
             - name: ConnectionStrings__Redis
-              value: $(HOST_IP):6379,password=$(REDIS_PASSWORD),abortConnect=false
+              value: hospital-redis-ha-haproxy:6379,password=$(REDIS_PASSWORD),abortConnect=false
             - name: Jwt__Secret
               valueFrom:
                 secretKeyRef:

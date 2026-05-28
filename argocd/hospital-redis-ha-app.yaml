@@ -1,0 +1,44 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: hospital-redis-ha-app
+  namespace: argocd
+spec:
+  project: default
+  source:
+    repoURL: https://charts.bitnami.com/bitnami
+    targetRevision: 20.3.0
+    chart: redis
+    helm:
+      releaseName: hospital-redis-ha
+      values: |
+        architecture: replication
+        auth:
+          enabled: true
+          existingSecret: redis-auth-secret
+          existingSecretPasswordKey: password
+        master:
+          persistence:
+            enabled: false
+        replica:
+          replicaCount: 2
+          persistence:
+            enabled: false
+        sentinel:
+          enabled: true
+        haproxy:
+          enabled: true
+        metrics:
+          enabled: true
+          serviceMonitor:
+            enabled: true
+            namespace: hospital-prod
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: hospital-prod
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true

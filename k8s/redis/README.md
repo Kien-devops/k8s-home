@@ -1,122 +1,71 @@
-# Redis For Hospital Workloads
+# Redis HA (High Availability) For Hospital Workloads
 
-This folder deploys Redis for the `hospital-prod` namespace.
+This folder previously contained the legacy DaemonSet-based node-local Redis setup.
+The architecture has been upgraded to a **true Enterprise High Availability (HA)** model using the Bitnami Redis Helm Chart. 
 
-## Architecture
+The installation is managed purely via GitOps through the ArgoCD application at `argocd/hospital-redis-ha-app.yaml`.
+
+## Architecture: Master-Replica with Sentinel & HAProxy
 
 ```mermaid
 flowchart TB
-    node1[Node 1] --> redis1[Redis DaemonSet Pod 1]
-    node2[Node 2] --> redis2[Redis DaemonSet Pod 2]
-    node3[Node 3] --> redis3[Redis DaemonSet Pod 3]
-
-    be1[Backend Pod on Node 1] -->|node-local loopback/IP| redis1
-    be2[Backend Pod on Node 2] -->|node-local loopback/IP| redis2
-    be3[Backend Pod on Node 3] -->|node-local loopback/IP| redis3
-
-    exporter1[Redis Exporter Pod 1] --> serviceMonitor[ServiceMonitor redis]
-    exporter2[Redis Exporter Pod 2] --> serviceMonitor
-    exporter3[Redis Exporter Pod 3] --> serviceMonitor
-    serviceMonitor --> prometheus[Prometheus]
+    be[Backend API Pods] -->|TCP 6379| haproxy[HAProxy Service]
+    
+    subgraph Redis HA Cluster
+        haproxy -->|Routes to Active Master| master[Redis Master Pod]
+        master -.->|Async Replication| replica1[Redis Replica 1]
+        master -.->|Async Replication| replica2[Redis Replica 2]
+        
+        sentinel1[Sentinel 1] -.->|Monitors| master
+        sentinel2[Sentinel 2] -.->|Monitors| master
+        sentinel3[Sentinel 3] -.->|Monitors| master
+    end
 ```
 
-To optimize cache lookup performance and eliminate latency overhead, Redis is deployed as a **DaemonSet** bound to a node-local host port. Each Kubernetes node runs exactly one standalone Redis instance. Backend API pods discover and connect to their node-local Redis instance using the node's IP (`status.hostIP`).
+### Key Design Choices
 
-## Files
+1. **In-Memory Pure Cache (No Persistence)**
+   To optimize IOPS and eliminate latency, disk persistence (`hostPath`, `AOF`, `RDB`) is completely disabled. Redis operates purely in-memory.
+   Data loss is prevented because the data is synchronized and held simultaneously in the RAM of 3 separate pods (1 Master, 2 Replicas) running across the cluster.
+   
+2. **Automated Failover (Sentinel)**
+   If the node running the Master pod crashes, the Sentinel quorum automatically promotes one of the Replicas to become the new Master within seconds. The data on its RAM is immediately available.
 
-| File | Purpose |
-|---|---|
-| `10-redis-configmap.yaml` | Redis standalone configuration. |
-| `20-redis-services.yaml` | Service configuration mapping to port `6379` and metrics port `9121`. |
-| `30-redis-daemonset.yaml` | DaemonSet containing Redis and redis-exporter containers, binding to node hostPorts. |
-| `50-redis-networkpolicy.yaml` | Restricts access to Redis ports from allowed pods. |
-| `backend-redis-secret.example.yaml` | Example Redis credentials secret. |
-| `kustomization.yaml` | Resources list for Kustomize build. |
+3. **Zero-Code-Change for Backend (HAProxy)**
+   Typically, applications must implement Sentinel-specific libraries to detect the current Master. To avoid changing the C# `.NET` connection logic, we deploy **HAProxy** as an intermediary. 
+   HAProxy tracks Sentinel events and always exposes a static DNS endpoint (`hospital-redis-ha-haproxy:6379`) pointing to the active Master. The backend connects to this endpoint like a standard, single Redis server.
 
-## Storage
+## Deployment & Configuration
 
-This cache implementation uses node-local persistent storage. Pods mount a **`hostPath`** volume mapping to `/var/lib/redis-data` on the host machine.
-This design removes dependencies on cloud-specific block storage (such as AWS EBS gp3) or external PersistentVolumeClaims, making it fully self-managed and compliant with on-premises infrastructure.
+The deployment is fully automated by ArgoCD. 
 
-> [!IMPORTANT]
-> Since the Redis container runs as non-root user `999` (governed by Kyverno cluster policies), you must pre-create the directory on each host node and assign ownership permissions to GID/UID `999` before deploying:
-> ```bash
-> sudo mkdir -p /var/lib/redis-data
-> sudo chown -R 999:999 /var/lib/redis-data
-> ```
+**Application Manifest:**
+`argocd/hospital-redis-ha-app.yaml`
 
-## Create The Redis Secret
+**Helm Chart Used:**
+`bitnami/redis` (Architecture: `replication`)
 
-To ensure security and adhere to GitOps principles, Redis credentials are managed via **AWS Secrets Manager** and synced by the **External Secrets Operator (ESO)**.
+## Security
 
-Create the secret in AWS Secrets Manager:
+Redis credentials are required for connection. To adhere to GitOps principles, no plain-text passwords exist in the cluster configuration.
+
+1. The password is created in **AWS Secrets Manager** (`hospital-redis-auth`).
+2. **External Secrets Operator (ESO)** syncs it to a Kubernetes Secret named `redis-auth-secret`.
+3. The Bitnami Helm Chart natively consumes this existing Secret to secure the Master, Replicas, and Sentinel nodes.
+
+## Troubleshooting
+
+If you need to verify cluster health, you can connect to the Redis CLI on the master pod and check replication status:
 
 ```bash
-aws secretsmanager create-secret \
-  --name hospital-redis-auth \
-  --description "Redis DaemonSet auth" \
-  --secret-string '{"password":"<strong-password>"}' \
-  --region us-east-1
+# Connect to the Redis Master
+kubectl exec -it hospital-redis-ha-master-0 -n hospital-prod -- bash
+
+# Authenticate and check replication
+REDISCLI_AUTH=$REDIS_PASSWORD redis-cli info replication
 ```
 
-Once created, ArgoCD and ESO will automatically sync this down to the `hospital-prod` namespace as a native Kubernetes Secret named `redis-auth-secret`.
-
-## Deploy
-
-Apply the Redis DaemonSet and configuration:
-
+Check the status of the HAProxy router:
 ```bash
-kubectl apply -k k8s/redis
-```
-
-Verify the DaemonSet and its pods:
-
-```bash
-kubectl get daemonset redis-daemonset -n hospital-prod
-kubectl get pods -n hospital-prod -l app.kubernetes.io/name=redis
-```
-
-## Application Connection
-
-The backend API dynamically discovers its node-local Redis instance by retrieving the node's IP address (`HOST_IP`) from the Kubernetes Downward API:
-
-```yaml
-env:
-  - name: HOST_IP
-    valueFrom:
-      fieldRef:
-        fieldPath: status.hostIP
-  - name: REDIS_PASSWORD
-    valueFrom:
-      secretKeyRef:
-        name: redis-auth-secret
-        key: password
-  - name: ConnectionStrings__RedisConnection
-    value: $(HOST_IP):6379,password=$(REDIS_PASSWORD),ssl=false,abortConnect=false
-```
-
-## Check Redis Status
-
-You can ping the node-local Redis instance from within any of the DaemonSet pods:
-
-```bash
-kubectl exec -it -n hospital-prod <redis-pod-name> -c redis -- redis-cli -a '<strong-password>' ping
-```
-
-Verify replication status (should indicate standalone mode: `role:master` and `connected_slaves:0`):
-
-```bash
-kubectl exec -it -n hospital-prod <redis-pod-name> -c redis -- redis-cli -a '<strong-password>' info replication
-```
-
-## Metrics
-
-Each DaemonSet pod includes a `redis-exporter` sidecar container listening on hostPort `9121`. Prometheus scrapes these metrics to monitor cache health.
-
-Useful Prometheus metrics:
-
-```text
-redis_up
-redis_connected_clients
-redis_memory_used_bytes
+kubectl get pods -n hospital-prod -l app.kubernetes.io/component=haproxy
 ```
