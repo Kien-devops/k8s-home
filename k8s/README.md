@@ -20,7 +20,7 @@ The `k8s/` folder is the runtime layer. It contains resources that run in, or co
 | Topic | Where it appears |
 |---|---|
 | Application runtime | `k8s/base` |
-| Redis node-local configuration | `k8s/redis` |
+| Redis HA cache operations | `k8s/redis` |
 | Environment overlays | `k8s/overlays/dev`, `k8s/overlays/stag`, `k8s/overlays/prod` |
 | Cluster security configuration | `k8s/security` |
 | Cluster monitoring configuration | `k8s/monitoring` |
@@ -70,12 +70,10 @@ k8s/
     07-be-deployment.yaml
     08-be-service.yaml
     10-network-policy.yaml
-  redis/                  # Node-local standalone Redis DaemonSet
-    10-redis-configmap.yaml
-    20-redis-services.yaml
-    30-redis-daemonset.yaml
-    50-redis-networkpolicy.yaml
-    kustomization.yaml
+  redis/                  # Redis HA cache notes and secret examples
+    README.md
+    redis-auth-secret.example.yaml
+    backend-redis-secret.example.yaml
   overlays/
     dev/
       namespace.yaml
@@ -104,7 +102,7 @@ k8s/
 | Path | Purpose | Installed or synced by |
 |---|---|---|
 | `k8s/base` | Hospital frontend/backend runtime resources. | `argocd/hospital-traefik-app.yaml` |
-| `k8s/redis` | Node-local standalone Redis DaemonSet. | `argocd/hospital-traefik-app.yaml` |
+| `k8s/redis` | Redis HA cache notes, troubleshooting, and secret examples. | `argocd/hospital-redis-ha-app.yaml` |
 | `k8s/overlays/*` | Environment-specific replica/image overrides. | Manual apply or future environment-specific Argo CD apps. |
 | `k8s/security` | Kyverno policies and security namespace. | `argocd/security/00-security-namespace-policies-app.yaml` |
 | `k8s/monitoring` | Prometheus rules and monitoring namespace. | `argocd/monitoring/20-monitoring-rules-app.yaml` |
@@ -142,8 +140,12 @@ kubectl -n hospital-dev create secret generic be-db-secret \
   --from-file=default-connection=k8s/secrets/default-connection.txt \
   --dry-run=client -o yaml | kubectl apply -f -
 
-# Create Redis password secret
+# Create Redis password secrets
 kubectl -n hospital-dev create secret generic redis-auth-secret \
+  --from-literal=password='<strong-redis-password>' \
+  --dry-run=client -o yaml | kubectl apply -f -
+
+kubectl -n hospital-dev create secret generic be-redis-secret \
   --from-literal=password='<strong-redis-password>' \
   --dry-run=client -o yaml | kubectl apply -f -
 ```
@@ -162,8 +164,7 @@ kubectl -n hospital-dev create secret docker-registry nexus-registry-secret \
 ## Verify
 
 ```bash
-kubectl get pods,svc,daemonset -n hospital-dev
+kubectl get pods,svc -n hospital-dev
 kubectl describe deploy be-deployment-v1 -n hospital-dev
 kubectl describe deploy fe-deployment-v1 -n hospital-dev
-kubectl describe daemonset redis-daemonset -n hospital-dev
 ```

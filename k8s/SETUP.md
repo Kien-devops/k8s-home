@@ -113,10 +113,10 @@ aws secretsmanager create-secret \
   --secret-string '{"secret":"<JWT_SECRET>"}' \
   --region us-east-1
 
-# 4. Redis auth (used by the Redis DaemonSet)
+# 4. Redis auth (used by the Redis HA Helm chart)
 aws secretsmanager create-secret \
   --name hospital-redis-auth \
-  --description "Redis DaemonSet auth" \
+  --description "Redis HA auth" \
   --secret-string '{"password":"<REDIS_PASSWORD>"}' \
   --region us-east-1
 
@@ -139,12 +139,22 @@ kubectl get externalsecret -n hospital-prod
 ```
 Look for `SecretSynced = True` under the STATUS column for all 5 secrets.
 
-## 9. Prepare Redis Data Directory (on worker nodes)
+## 9. Redis HA Cache
+
+Redis is installed by Argo CD from the Bitnami Redis Helm chart:
 
 ```bash
-sudo mkdir -p /var/lib/redis-data
-sudo chown -R 999:999 /var/lib/redis-data
+kubectl apply -f argocd/hospital-redis-ha-app.yaml
 ```
+
+The production backend connects to:
+
+```text
+hospital-redis-ha:6379
+```
+
+Persistence is disabled for this cache-only Redis deployment, so no worker-node
+data directory is required.
 
 ## 10. Deploy
 
@@ -156,8 +166,8 @@ kubectl apply -f onprem/traefik/10-app-gateway-routes.example.yaml
 # Hospital app
 kubectl apply -k k8s/overlays/prod
 
-# Redis
-kubectl apply -k k8s/redis
+# Redis HA cache
+kubectl apply -f argocd/hospital-redis-ha-app.yaml
 ```
 
 ## 11. Verify
@@ -172,7 +182,7 @@ kubectl get pods -n traefik
 
 ```bash
 kubectl delete -k k8s/overlays/prod
-kubectl delete -k k8s/redis
+kubectl delete -f argocd/hospital-redis-ha-app.yaml
 kubectl delete -k onprem/traefik
 ```
 
@@ -181,7 +191,7 @@ kubectl delete -k onprem/traefik
 | Symptom | Fix |
 |---|---|
 | Calico cross-node DNS timeout | `kubectl set env ds/calico-node -n kube-system IP_AUTODETECTION_METHOD="cidr=192.168.1.0/24"` |
-| Redis `Permission denied` on `/data` | `sudo chown -R 999:999 /var/lib/redis-data` on worker nodes |
+| Backend Redis timeout to `hospital-redis-ha-haproxy:6379` | Set `ConnectionStrings__Redis` to `hospital-redis-ha:6379,password=$(REDIS_PASSWORD),abortConnect=false` and restart backend |
 | BE `CreateContainerConfigError` | Verify all secrets exist: `kubectl get secrets -n hospital-prod` |
 | BE `ImagePullBackOff` | Verify `nexus-registry-secret` exists and CRI-O insecure registry is configured |
 | Metrics Server crash | Patch with `--kubelet-insecure-tls` for bare-metal |

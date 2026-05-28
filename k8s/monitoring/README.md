@@ -20,7 +20,7 @@ k8s/monitoring    = configure monitoring inside the cluster
 |---|---|
 | `monitoring` namespace | Shared namespace for Prometheus, Grafana, and Alertmanager. |
 | PrometheusRule | Custom workload alerts for the hospital namespaces. |
-| ServiceMonitor | Scrapes custom endpoints (like the Redis DaemonSet metrics). |
+| ServiceMonitor | Scrapes custom endpoints, including Redis metrics when enabled by the Helm chart. |
 | kube-prometheus-stack | Installed by Argo CD from Helm in `argocd/monitoring`. Provides Prometheus, Grafana, Alertmanager, node-exporter, and kube-state-metrics. |
 
 ## Metrics Source Model
@@ -37,7 +37,7 @@ flowchart LR
   prom --> alertmanager[Alertmanager]
 ```
 
-This project monitors infrastructure metrics (node, pod, container, Deployment, and Kubernetes object metrics) alongside service metrics scraped via custom ServiceMonitors (such as node-local Redis DaemonSet metrics).
+This project monitors infrastructure metrics (node, pod, container, Deployment, and Kubernetes object metrics) alongside service metrics scraped via custom ServiceMonitors, including Redis metrics when enabled.
 
 ## Apply Namespace And Rules
 

@@ -1,71 +1,198 @@
-# Redis HA (High Availability) For Hospital Workloads
+# Redis HA Cache For Hospital Workloads
 
-This folder previously contained the legacy DaemonSet-based node-local Redis setup.
-The architecture has been upgraded to a **true Enterprise High Availability (HA)** model using the Bitnami Redis Helm Chart. 
+Redis is used by the Hospital backend as an ASP.NET Core distributed cache. The
+current production deployment is managed by Argo CD with the Bitnami Redis Helm
+chart at `argocd/hospital-redis-ha-app.yaml`.
 
-The installation is managed purely via GitOps through the ArgoCD application at `argocd/hospital-redis-ha-app.yaml`.
+The backend connects to the Kubernetes service:
 
-## Architecture: Master-Replica with Sentinel & HAProxy
+```text
+hospital-redis-ha:6379
+```
+
+Do not point the backend at `hospital-redis-ha-haproxy`; that service is not
+present in the current release. The backend connection string is configured in
+`k8s/base/07-be-deployment.yaml`:
+
+```yaml
+ConnectionStrings__Redis: hospital-redis-ha:6379,password=$(REDIS_PASSWORD),abortConnect=false
+```
+
+## Architecture
 
 ```mermaid
 flowchart TB
-    be[Backend API Pods] -->|TCP 6379| haproxy[HAProxy Service]
-    
+    be[Backend API Pods] -->|TCP 6379| svc[hospital-redis-ha Service]
+
     subgraph Redis HA Cluster
-        haproxy -->|Routes to Active Master| master[Redis Master Pod]
-        master -.->|Async Replication| replica1[Redis Replica 1]
-        master -.->|Async Replication| replica2[Redis Replica 2]
-        
-        sentinel1[Sentinel 1] -.->|Monitors| master
-        sentinel2[Sentinel 2] -.->|Monitors| master
-        sentinel3[Sentinel 3] -.->|Monitors| master
+        svc --> master[Redis Master Pod]
+        master -.->|Async replication| replica[Redis Replica Pod]
+        sentinel1[Sentinel] -.->|Monitors| master
+        sentinel2[Sentinel] -.->|Monitors| replica
     end
 ```
 
-### Key Design Choices
+## Runtime Behavior
 
-1. **In-Memory Pure Cache (No Persistence)**
-   To optimize IOPS and eliminate latency, disk persistence (`hostPath`, `AOF`, `RDB`) is completely disabled. Redis operates purely in-memory.
-   Data loss is prevented because the data is synchronized and held simultaneously in the RAM of 3 separate pods (1 Master, 2 Replicas) running across the cluster.
-   
-2. **Automated Failover (Sentinel)**
-   If the node running the Master pod crashes, the Sentinel quorum automatically promotes one of the Replicas to become the new Master within seconds. The data on its RAM is immediately available.
+- Redis is an in-memory cache for API response data.
+- Persistence is disabled in the Helm values, so cache data lives in pod RAM and
+  can be rebuilt by the application.
+- The backend uses `AddStackExchangeRedisCache` with `InstanceName = "hospital:"`.
+- Cache keys therefore start with `hospital:`.
+- ASP.NET Core `IDistributedCache` stores values as Redis hashes, so inspect
+  cached API responses with `HGETALL`, not `GET`.
+- Current Doctor cache TTL is 300 seconds from `[RedisCache("doctor", 300)]`.
 
-3. **Zero-Code-Change for Backend (HAProxy)**
-   Typically, applications must implement Sentinel-specific libraries to detect the current Master. To avoid changing the C# `.NET` connection logic, we deploy **HAProxy** as an intermediary. 
-   HAProxy tracks Sentinel events and always exposes a static DNS endpoint (`hospital-redis-ha-haproxy:6379`) pointing to the active Master. The backend connects to this endpoint like a standard, single Redis server.
+## Secrets
 
-## Deployment & Configuration
+Redis credentials are not committed to Git.
 
-The deployment is fully automated by ArgoCD. 
+| Source | Kubernetes target | Used by |
+|---|---|---|
+| AWS Secrets Manager `hospital-redis-auth` property `password` | `redis-auth-secret` | Redis Helm chart |
+| AWS Secrets Manager `hospital-be-redis` property `password` | `be-redis-secret` | Backend `REDIS_PASSWORD` env |
 
-**Application Manifest:**
-`argocd/hospital-redis-ha-app.yaml`
+The two passwords must match unless Redis and backend auth are intentionally
+changed together.
 
-**Helm Chart Used:**
-`bitnami/redis` (Architecture: `replication`)
-
-## Security
-
-Redis credentials are required for connection. To adhere to GitOps principles, no plain-text passwords exist in the cluster configuration.
-
-1. The password is created in **AWS Secrets Manager** (`hospital-redis-auth`).
-2. **External Secrets Operator (ESO)** syncs it to a Kubernetes Secret named `redis-auth-secret`.
-3. The Bitnami Helm Chart natively consumes this existing Secret to secure the Master, Replicas, and Sentinel nodes.
-
-## Troubleshooting
-
-If you need to verify cluster health, you can connect to the Redis CLI on the master pod and check replication status:
+Verify ESO synchronization:
 
 ```bash
-# Connect to the Redis Master
-kubectl exec -it hospital-redis-ha-master-0 -n hospital-prod -- bash
-
-# Authenticate and check replication
-REDISCLI_AUTH=$REDIS_PASSWORD redis-cli info replication
+kubectl get externalsecret -n hospital-prod
+kubectl get secret -n hospital-prod redis-auth-secret be-redis-secret
 ```
 
-Check the status of the HAProxy router:
+## Connectivity Checks
+
+Check Redis services and pods:
+
 ```bash
-kubectl get pods -n hospital-prod -l app.kubernetes.io/component=haproxy
+kubectl get svc -n hospital-prod | grep redis
+kubectl get pods -n hospital-prod -o wide | grep redis
 ```
+
+Check the backend Redis connection string:
+
+```bash
+kubectl exec -n hospital-prod deploy/be-deployment-v1 -- \
+  printenv | grep ConnectionStrings__Redis
+```
+
+Expected value:
+
+```text
+ConnectionStrings__Redis=hospital-redis-ha:6379,password=<redacted>,abortConnect=false
+```
+
+If it points to `hospital-redis-ha-haproxy`, update the deployment or GitOps
+manifest and restart the backend.
+
+## Test API Cache
+
+Call a cached endpoint twice:
+
+```bash
+curl -i https://benhvien.teamdevops.shop/api/Doctor
+curl -i https://benhvien.teamdevops.shop/api/Doctor
+```
+
+Expected headers:
+
+```text
+X-Cache: MISS
+X-Cache: HIT
+```
+
+`MISS` means the backend read from the database and wrote the response to Redis.
+`HIT` means the backend served the response from Redis.
+
+## Inspect Cached Keys
+
+Set the Redis password in the shell before running Redis CLI commands:
+
+```bash
+export REDISCLI_AUTH='<redis-password>'
+```
+
+List Hospital cache keys:
+
+```bash
+kubectl exec -n hospital-prod hospital-redis-ha-node-0 -c redis -- \
+  redis-cli --scan --pattern 'hospital:*'
+```
+
+Check the key type:
+
+```bash
+kubectl exec -n hospital-prod hospital-redis-ha-node-0 -c redis -- \
+  redis-cli TYPE 'hospital:response-cache:doctor:v1:/api/Doctor'
+```
+
+Read a cached response. `IDistributedCache` stores the value as a hash:
+
+```bash
+kubectl exec -n hospital-prod hospital-redis-ha-node-0 -c redis -- \
+  redis-cli HGETALL 'hospital:response-cache:doctor:v1:/api/Doctor'
+```
+
+Check TTL and memory used by the cached response:
+
+```bash
+kubectl exec -n hospital-prod hospital-redis-ha-node-0 -c redis -- \
+  redis-cli TTL 'hospital:response-cache:doctor:v1:/api/Doctor'
+
+kubectl exec -n hospital-prod hospital-redis-ha-node-0 -c redis -- \
+  redis-cli MEMORY USAGE 'hospital:response-cache:doctor:v1:/api/Doctor'
+```
+
+## Inspect RAM Usage
+
+Redis stores cache data in RAM. Check memory usage:
+
+```bash
+kubectl exec -n hospital-prod hospital-redis-ha-node-0 -c redis -- \
+  redis-cli INFO memory
+```
+
+Important fields:
+
+| Field | Meaning |
+|---|---|
+| `used_memory_human` | Logical memory used by Redis. |
+| `used_memory_dataset` | Approximate memory used by actual key/value data. |
+| `used_memory_rss_human` | Memory allocated to the Redis process by the OS. |
+| `maxmemory` | Configured Redis memory limit. `0` means no Redis-level limit. |
+| `maxmemory_policy` | Eviction behavior. `noeviction` means writes fail if memory is exhausted. |
+
+Check the number of keys:
+
+```bash
+kubectl exec -n hospital-prod hospital-redis-ha-node-0 -c redis -- \
+  redis-cli DBSIZE
+```
+
+## Replication Checks
+
+Check whether the pod is master or replica and whether replicas are online:
+
+```bash
+kubectl exec -n hospital-prod hospital-redis-ha-node-0 -c redis -- \
+  redis-cli INFO replication
+```
+
+Healthy master output includes:
+
+```text
+role:master
+connected_slaves:1
+slave0:...,state=online,...
+```
+
+## Common Issues
+
+| Symptom | Cause | Fix |
+|---|---|---|
+| `/api/Doctor` returns HTTP 500 and logs show `UnableToConnect on hospital-redis-ha-haproxy:6379` | Backend points to a non-existent Redis service. | Set `ConnectionStrings__Redis` to `hospital-redis-ha:6379,password=$(REDIS_PASSWORD),abortConnect=false`, restart backend, and commit the manifest change. |
+| `GET <cache-key>` returns `WRONGTYPE` | The key is a Redis hash created by .NET `IDistributedCache`. | Use `TYPE` and `HGETALL`. |
+| First API call has `X-Cache: MISS` | Cache key did not exist yet or TTL expired. | Call the same endpoint again and expect `X-Cache: HIT`. |
+| Redis CLI warns about password on command line | `-a` exposes the password in command history/process args. | Prefer `export REDISCLI_AUTH='<redis-password>'`. |

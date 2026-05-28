@@ -227,7 +227,7 @@ This split is intentional for learning:
 |-- hospital_FE/              # React/Vite frontend, served by nginx as a non-root user
 |-- hospital_BE/              # ASP.NET Core 9 backend API
 |-- k8s/base/                 # Namespace, Deployments, Services, NetworkPolicy, Kustomize
-|-- k8s/redis/                # Standalone Redis DaemonSet (node-local) and ServiceMonitor
+|-- k8s/redis/                # Redis HA cache notes, troubleshooting, and secret examples
 |-- k8s/security/             # Security namespace and Kyverno policy baseline
 |-- k8s/monitoring/           # Monitoring namespace and custom Prometheus alert rules
 |-- k8s/logging/              # Logging namespace and Grafana Loki datasource
@@ -476,10 +476,10 @@ aws secretsmanager create-secret \
   --secret-string '{"secret":"<jwt-secret-key>"}' \
   --region us-east-1
 
-# 4. Redis auth (used by the Redis DaemonSet)
+# 4. Redis auth (used by the Redis HA Helm chart)
 aws secretsmanager create-secret \
   --name hospital-redis-auth \
-  --description "Redis DaemonSet auth" \
+  --description "Redis HA auth" \
   --secret-string '{"password":"<redis-password>"}' \
   --region us-east-1
 
@@ -558,7 +558,7 @@ Before rerunning the workflow, confirm:
 - `GIT_PASSWORD` is a valid GitHub PAT with repository write access to update manifests.
 - `SONAR_TOKEN` is a valid **Project Analysis Token** (not a User token).
 - All 5 required secrets (`be-db-secret`, `be-redis-secret`, `be-jwt-secret`, `redis-auth-secret`, `nexus-registry-secret`) are successfully synced by ESO and show `SecretSynced = True`.
-- Redis data directory exists on worker nodes: `/var/lib/redis-data` owned by `999:999`.
+- Redis backend connection string points to `hospital-redis-ha:6379`, and Redis secrets are synced by ESO.
 - ArgoCD NetworkPolicies are deleted (bare-metal clusters).
 - Argo CD watches the same branch/path that the workflow updates (`devops` branch).
 
@@ -576,7 +576,7 @@ Before rerunning the workflow, confirm:
 | Workflow loops repeatedly | Manifest update commit retriggers pipeline | Keep the skip guard for `ci: update image tag`. |
 | Calico cross-node DNS timeout | Calico selects Tailscale interface instead of LAN | `kubectl set env ds/calico-node -n kube-system IP_AUTODETECTION_METHOD="cidr=192.168.1.0/24"` |
 | ArgoCD Redis `i/o timeout` | Default NetworkPolicies block internal traffic | `kubectl delete networkpolicy --all -n argocd` then restart deployments. |
-| Redis `Permission denied` on start | hostPath `/var/lib/redis-data` wrong ownership | `sudo chown -R 999:999 /var/lib/redis-data` on worker nodes. |
+| Backend Redis timeout to `hospital-redis-ha-haproxy:6379` | Backend points to a non-existent Redis service | Set `ConnectionStrings__Redis` to `hospital-redis-ha:6379,password=$(REDIS_PASSWORD),abortConnect=false`, restart backend, and commit the manifest change. |
 | BE `CreateContainerConfigError` | Missing Kubernetes secrets | Check AWS Secrets Manager and ESO sync status for `be-db-secret`, `be-redis-secret`, `be-jwt-secret`. |
 | CRI-O `ImagePullBackOff` for Nexus | CRI-O does not trust HTTP registry | Add `/etc/containers/registries.conf.d/100-nexus.conf` with `insecure = true`. |
 | SonarQube `not authorized to run analysis` | Token lacks Execute Analysis permission | Generate a **Project Analysis Token** in SonarQube UI, update `SONAR_TOKEN` secret. |
@@ -609,7 +609,7 @@ Before rerunning the workflow, confirm:
 | `k8s/logging/README.md` | Logging namespace, Loki datasource, and local storage plan. |
 | `argocd/logging/README.md` | GitOps installation of Loki and Promtail. |
 | `k8s/README.md` | Kubernetes manifests, namespace, services, and secrets. |
-| `k8s/redis/README.md` | Node-local standalone Redis DaemonSet configuration and setup. |
+| `k8s/redis/README.md` | Redis HA cache configuration, memory inspection, and cache test commands. |
 | `argocd/README.md` | GitOps deployment with Argo CD. |
 | `onprem/README.md` | On-prem HAProxy Ingress deployment path. |
 | `onprem/haproxy/README.md` | HAProxy edge load balancer setup, TLS, reload, and troubleshooting. |
