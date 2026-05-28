@@ -25,6 +25,13 @@ spec:
             type: ClusterIP
           persistence:
             enabled: false
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi
 
         prometheus:
           prometheusSpec:
@@ -54,9 +61,35 @@ spec:
 
         kube-state-metrics:
           enabled: true
+          resources:
+            requests:
+              cpu: 10m
+              memory: 32Mi
+            limits:
+              cpu: 50m
+              memory: 128Mi
 
         prometheus-node-exporter:
           enabled: true
+          resources:
+            requests:
+              cpu: 10m
+              memory: 32Mi
+            limits:
+              cpu: 50m
+              memory: 128Mi
+
+        prometheusOperator:
+          admissionWebhooks:
+            patch:
+              enabled: true
+              resources:
+                requests:
+                  cpu: 10m
+                  memory: 32Mi
+                limits:
+                  cpu: 50m
+                  memory: 64Mi
   destination:
     server: https://kubernetes.default.svc
     namespace: monitoring
