@@ -47,14 +47,19 @@ This design removes dependencies on cloud-specific block storage (such as AWS EB
 
 ## Create The Redis Secret
 
-Define a Kubernetes Secret containing the Redis password before deploying the workload:
+To ensure security and adhere to GitOps principles, Redis credentials are managed via **AWS Secrets Manager** and synced by the **External Secrets Operator (ESO)**.
+
+Create the secret in AWS Secrets Manager:
 
 ```bash
-kubectl create secret generic redis-auth-secret \
-  -n hospital-prod \
-  --from-literal=password='<strong-password>' \
-  --dry-run=client -o yaml | kubectl apply -f -
+aws secretsmanager create-secret \
+  --name hospital-redis-auth \
+  --description "Redis DaemonSet auth" \
+  --secret-string '{"password":"<strong-password>"}' \
+  --region us-east-1
 ```
+
+Once created, ArgoCD and ESO will automatically sync this down to the `hospital-prod` namespace as a native Kubernetes Secret named `redis-auth-secret`.
 
 ## Deploy
 

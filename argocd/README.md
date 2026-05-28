@@ -288,7 +288,7 @@ argocd app sync hospital-traefik-app
 | Topic | Guidance |
 |---|---|
 | Manual edits | Avoid `kubectl edit` for managed resources. Commit the change to Git instead. |
-| Runtime secrets | Keep secrets such as `be-db-secret`, `redis-auth-secret`, and `nexus-registry-secret` created separately in the cluster. |
+| Runtime secrets | Secrets such as `be-db-secret`, `redis-auth-secret`, and `nexus-registry-secret` are securely managed via AWS Secrets Manager and synced by External Secrets Operator (ESO). |
 | Image deployment | GitHub Actions updates image tags in Git, then Argo CD syncs. |
 | Drift | Self-heal will bring live resources back to Git state. |
 | Prune | Deleted manifests can delete live resources during sync. Review changes carefully. |
@@ -300,5 +300,5 @@ argocd app sync hospital-traefik-app
 | Application is OutOfSync | Review changed resources and sync status. |
 | Application is Degraded | Inspect pod status, events, and CRD readiness. |
 | Sync fails on Gateway resources | Gateway API CRDs and Traefik CRDs must exist. |
-| Image pull errors after sync | `nexus-registry-secret`, image tag, registry connectivity. |
+| Image pull errors after sync | Check ESO sync status for `nexus-registry-secret`, image tag, registry connectivity. |
 | Manual changes disappear | Expected behavior when self-heal is enabled. |

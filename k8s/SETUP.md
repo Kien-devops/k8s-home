@@ -83,38 +83,61 @@ Kustomize overlays are split by environment:
 |---|---|---|
 | prod | `k8s/overlays/prod` | `hospital-prod` |
 
-## 8. Create Required Secrets
+## 8. Configure Enterprise Secrets Management
+
+To maintain security and GitOps compliance, secrets are not created manually via `kubectl`. Instead, we use **AWS Secrets Manager** as the central authority, and the **External Secrets Operator (ESO)** synchronizes them to the cluster.
+
+### A. Create Secrets in AWS Secrets Manager
+
+Execute the following commands to create the 5 required credentials in your AWS environment.
 
 ```bash
-export K8S_NAMESPACE=hospital-prod
+# 1. Database connection string
+aws secretsmanager create-secret \
+  --name hospital-be-db \
+  --description "Database Connection String" \
+  --secret-string '{"default-connection":"Server=<DB_IP>;Database=HospitalDB;User Id=sa;Password=<DB_PASSWORD>;TrustServerCertificate=True"}' \
+  --region us-east-1
 
-# Database connection
-kubectl create secret generic be-db-secret \
-  -n $K8S_NAMESPACE \
-  --from-literal=default-connection='Server=<DB_IP>;Database=HospitalDB;User Id=sa;Password=<DB_PASSWORD>;TrustServerCertificate=True'
+# 2. Redis password for backend
+aws secretsmanager create-secret \
+  --name hospital-be-redis \
+  --description "Redis password for backend" \
+  --secret-string '{"password":"<REDIS_PASSWORD>"}' \
+  --region us-east-1
 
-# Redis password (must match redis-auth-secret)
-kubectl create secret generic be-redis-secret \
-  -n $K8S_NAMESPACE \
-  --from-literal=password='<REDIS_PASSWORD>'
+# 3. JWT signing key
+aws secretsmanager create-secret \
+  --name hospital-be-jwt \
+  --description "JWT signing key" \
+  --secret-string '{"secret":"<JWT_SECRET>"}' \
+  --region us-east-1
 
-# JWT secret
-kubectl create secret generic be-jwt-secret \
-  -n $K8S_NAMESPACE \
-  --from-literal=secret='<JWT_SECRET>'
+# 4. Redis auth (used by the Redis DaemonSet)
+aws secretsmanager create-secret \
+  --name hospital-redis-auth \
+  --description "Redis DaemonSet auth" \
+  --secret-string '{"password":"<REDIS_PASSWORD>"}' \
+  --region us-east-1
 
-# Redis auth (used by redis DaemonSet)
-kubectl create secret generic redis-auth-secret \
-  -n $K8S_NAMESPACE \
-  --from-literal=password='<REDIS_PASSWORD>'
-
-# Nexus image pull secret
-kubectl create secret docker-registry nexus-registry-secret \
-  -n $K8S_NAMESPACE \
-  --docker-server=100.112.150.56:8082 \
-  --docker-username=admin \
-  --docker-password='<NEXUS_PASSWORD>'
+# 5. Nexus image pull credentials
+aws secretsmanager create-secret \
+  --name hospital-nexus-registry \
+  --description "Nexus Docker Registry credentials for K8s ImagePullSecrets" \
+  --secret-string '{"username":"admin","password":"<NEXUS_PASSWORD>"}' \
+  --region us-east-1
 ```
+
+### B. Sync via External Secrets Operator
+
+When you deploy your application (via ArgoCD or Kustomize), the `ExternalSecret` custom resources will automatically be applied. ESO will pull these AWS secrets and generate the necessary Kubernetes `Secret` resources.
+
+Verify that the secrets have successfully synchronized:
+
+```bash
+kubectl get externalsecret -n hospital-prod
+```
+Look for `SecretSynced = True` under the STATUS column for all 5 secrets.
 
 ## 9. Prepare Redis Data Directory (on worker nodes)
 

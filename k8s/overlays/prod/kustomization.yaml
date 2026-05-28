@@ -5,6 +5,7 @@ namespace: hospital-prod
 
 resources:
   - namespace.yaml
+  - external-secrets.yaml
   - ../../base
 
 replicas:

@@ -75,6 +75,7 @@ flowchart TB
   gha --> manifest[Update Kubernetes image tags in Git]
   manifest --> argocd[Argo CD]
   argocd --> k8s[On-Premise K8s]
+  aws[AWS Secrets Manager] -. ESO syncs secrets .-> k8s
 
   k8s --> fe[Frontend pods]
   k8s --> be[Backend API pods]
@@ -141,11 +142,16 @@ flowchart TB
     git --> argo
   end
 
+  subgraph Cloud[Cloud Services]
+    aws[AWS Secrets Manager]
+  end
+
   subgraph Runtime[K8s Runtime]
     app[Hospital FE/BE]
     sec[Kyverno + Trivy Operator + Falco]
     mon[Prometheus + Grafana + Alertmanager]
     log[Loki + Promtail]
+    eso[External Secrets Operator]
   end
 
   nexus_reg --> app
@@ -154,6 +160,9 @@ flowchart TB
   argo --> sec
   argo --> mon
   argo --> log
+  argo --> eso
+  aws -. syncs via IAM .-> eso
+  eso -. creates secrets .-> app
   sec -. protects .-> app
   mon -. observes .-> app
   log -. collects logs .-> app
@@ -432,48 +441,67 @@ Required secrets:
 | `GIT_PASSWORD` | Yes | GitHub Personal Access Token (PAT) with write permissions to update manifests. |
 | `SONAR_TOKEN` | No | SonarQube token for code quality scans. |
 
-## Nexus and Argo CD Setup
+## Enterprise Secrets Management (External Secrets Operator)
 
-Create the namespace and configure all required secrets in Kubernetes:
+This project uses an **Enterprise-grade Secrets Management Architecture** to prevent sensitive data (like database connection strings, passwords, and API keys) from being committed to Git or manually managed in the cluster.
 
-> **NOTE**: The External Secrets Operator (ESO) is installed via ArgoCD but is
-> **not actively syncing secrets** on the on-prem cluster. Secrets are created
-> manually using `kubectl`. When AWS credentials are configured on the cluster
-> (via IAM role or access key), enable ESO by uncommenting the ExternalSecret
-> resources in `k8s/base/kustomization.yaml`.
+**The Model:**
+1. **Single Source of Truth**: All secrets reside securely in **AWS Secrets Manager**.
+2. **Identity & Access**: The Kubernetes cluster securely authenticates to AWS using IAM credentials (or IAM Roles for Service Accounts).
+3. **Automated Synchronization**: The **External Secrets Operator (ESO)** continuously watches AWS Secrets Manager. It automatically fetches the cloud secrets and templates them into native Kubernetes `Secret` resources in the `hospital-prod` namespace.
+
+### Step 1: Create Secrets in AWS Secrets Manager
+
+Run these commands using the AWS CLI to securely populate the central secret store:
 
 ```bash
-export K8S_NAMESPACE=hospital-prod
-
-kubectl create namespace $K8S_NAMESPACE
-
 # 1. Database connection string
-kubectl create secret generic be-db-secret \
-  -n $K8S_NAMESPACE \
-  --from-literal=default-connection="Server=YOUR_DB_IP;Database=HospitalDB;User Id=sa;Password=YOUR_PASSWORD;TrustServerCertificate=True;"
+aws secretsmanager create-secret \
+  --name hospital-be-db \
+  --description "Database Connection String" \
+  --secret-string '{"default-connection":"Server=YOUR_DB_IP;Database=HospitalDB;User Id=sa;Password=YOUR_PASSWORD;TrustServerCertificate=True"}' \
+  --region us-east-1
 
-# 2. Redis password for backend (must match redis-auth-secret)
-kubectl create secret generic be-redis-secret \
-  -n $K8S_NAMESPACE \
-  --from-literal=password='<redis-password>'
+# 2. Redis password for backend
+aws secretsmanager create-secret \
+  --name hospital-be-redis \
+  --description "Redis password for backend" \
+  --secret-string '{"password":"<redis-password>"}' \
+  --region us-east-1
 
 # 3. JWT signing key
-kubectl create secret generic be-jwt-secret \
-  -n $K8S_NAMESPACE \
-  --from-literal=secret='<jwt-secret-key>'
+aws secretsmanager create-secret \
+  --name hospital-be-jwt \
+  --description "JWT signing key" \
+  --secret-string '{"secret":"<jwt-secret-key>"}' \
+  --region us-east-1
 
 # 4. Redis auth (used by the Redis DaemonSet)
-kubectl create secret generic redis-auth-secret \
-  -n $K8S_NAMESPACE \
-  --from-literal=password='<redis-password>'
+aws secretsmanager create-secret \
+  --name hospital-redis-auth \
+  --description "Redis DaemonSet auth" \
+  --secret-string '{"password":"<redis-password>"}' \
+  --region us-east-1
 
-# 5. Nexus image pull secret
-kubectl create secret docker-registry nexus-registry-secret \
-  -n $K8S_NAMESPACE \
-  --docker-server=100.112.150.56:8082 \
-  --docker-username=<nexus-username> \
-  --docker-password=<nexus-password>
+# 5. Nexus image pull credentials
+aws secretsmanager create-secret \
+  --name hospital-nexus-registry \
+  --description "Nexus Docker Registry credentials for K8s ImagePullSecrets" \
+  --secret-string '{"username":"<nexus-username>","password":"<nexus-password>"}' \
+  --region us-east-1
 ```
+
+### Step 2: Sync via GitOps
+
+Once the credentials exist in AWS, the GitOps pipeline takes over. Ensure your cluster is authenticated to AWS (via the `awssm-secret` IAM credentials).
+
+ArgoCD will automatically apply the `ExternalSecret` manifests located in `k8s/overlays/prod/external-secrets.yaml`. ESO will then generate the corresponding native Kubernetes secrets (`be-db-secret`, `be-redis-secret`, `be-jwt-secret`, `redis-auth-secret`, `nexus-registry-secret`).
+
+Verify synchronization:
+```bash
+kubectl get externalsecret -n hospital-prod
+```
+All secrets should report `SecretSynced = True`.
 
 Render manifests locally:
 
@@ -529,7 +557,7 @@ Before rerunning the workflow, confirm:
 - GitHub secrets exist and contain the correct values.
 - `GIT_PASSWORD` is a valid GitHub PAT with repository write access to update manifests.
 - `SONAR_TOKEN` is a valid **Project Analysis Token** (not a User token).
-- Kubernetes has all 5 required secrets: `be-db-secret`, `be-redis-secret`, `be-jwt-secret`, `redis-auth-secret`, `nexus-registry-secret`.
+- All 5 required secrets (`be-db-secret`, `be-redis-secret`, `be-jwt-secret`, `redis-auth-secret`, `nexus-registry-secret`) are successfully synced by ESO and show `SecretSynced = True`.
 - Redis data directory exists on worker nodes: `/var/lib/redis-data` owned by `999:999`.
 - ArgoCD NetworkPolicies are deleted (bare-metal clusters).
 - Argo CD watches the same branch/path that the workflow updates (`devops` branch).
@@ -543,13 +571,13 @@ Before rerunning the workflow, confirm:
 | `could not read Username for 'https://github.com'` | Bad GitHub username or PAT | Update `GIT_USERNAME` and `GIT_PASSWORD` with a valid PAT. |
 | Nexus Registry push rejected | Authentication failure or registry misconfigured | Verify Nexus user credentials and that the `8082` Docker registry connector is active and supports V2 APIs. |
 | Trivy reports HIGH/CRITICAL findings | Base image or packages contain CVEs | Upgrade the base image or update packages during the Docker build, then rerun the scan. |
-| `nexus-registry-secret` not found | ImagePullBackOff on pods | Verify that the image pull secret was created in the correct namespace (`hospital-prod`). |
+| `nexus-registry-secret` not found | ImagePullBackOff on pods | Verify that ESO has successfully synced the secret from AWS Secrets Manager (`kubectl get externalsecret -n hospital-prod`). |
 | Argo CD does not sync | Branch/path mismatch or app unhealthy | Check `argocd/hospital-traefik-app.yaml`, app status, and repo credentials. |
 | Workflow loops repeatedly | Manifest update commit retriggers pipeline | Keep the skip guard for `ci: update image tag`. |
 | Calico cross-node DNS timeout | Calico selects Tailscale interface instead of LAN | `kubectl set env ds/calico-node -n kube-system IP_AUTODETECTION_METHOD="cidr=192.168.1.0/24"` |
 | ArgoCD Redis `i/o timeout` | Default NetworkPolicies block internal traffic | `kubectl delete networkpolicy --all -n argocd` then restart deployments. |
 | Redis `Permission denied` on start | hostPath `/var/lib/redis-data` wrong ownership | `sudo chown -R 999:999 /var/lib/redis-data` on worker nodes. |
-| BE `CreateContainerConfigError` | Missing Kubernetes secrets | Create `be-db-secret`, `be-redis-secret`, `be-jwt-secret` in `hospital-prod`. |
+| BE `CreateContainerConfigError` | Missing Kubernetes secrets | Check AWS Secrets Manager and ESO sync status for `be-db-secret`, `be-redis-secret`, `be-jwt-secret`. |
 | CRI-O `ImagePullBackOff` for Nexus | CRI-O does not trust HTTP registry | Add `/etc/containers/registries.conf.d/100-nexus.conf` with `insecure = true`. |
 | SonarQube `not authorized to run analysis` | Token lacks Execute Analysis permission | Generate a **Project Analysis Token** in SonarQube UI, update `SONAR_TOKEN` secret. |
 | Docker `sudo` errors in CI SSH | SSH user not in docker group | `sudo usermod -aG docker monitor && newgrp docker` on build host. |
