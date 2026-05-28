@@ -26,6 +26,7 @@ spec:
                 - argocd
                 - ingress-nginx
                 - security
+                - monitoring
       validate:
         message: "CPU and memory requests and limits are required."
         pattern:
