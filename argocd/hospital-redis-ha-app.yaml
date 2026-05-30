@@ -24,6 +24,7 @@ spec:
           replicaCount: 2
           persistence:
             enabled: false
+          podAntiAffinityPreset: hard
         sentinel:
           enabled: true
         haproxy:
