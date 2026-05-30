@@ -16,8 +16,8 @@ spec:
           scanJobsConcurrentLimit: 2
         trivy:
           ignoreUnfixed: true
-        nodeCollector:
-          tolerations:
+        trivyOperator:
+          scanJobTolerations:
             - effect: NoSchedule
               operator: Exists
             - effect: NoExecute
