@@ -112,11 +112,11 @@ spec:
         sidecar:
           resources:
             requests:
-              cpu: 10m
-              memory: 32Mi
-            limits:
-              cpu: 50m
+              cpu: 30m
               memory: 64Mi
+            limits:
+              cpu: 150m
+              memory: 256Mi
 
   destination:
     server: https://kubernetes.default.svc
