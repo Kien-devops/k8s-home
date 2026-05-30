@@ -20,13 +20,31 @@ spec:
         master:
           persistence:
             enabled: false
+          readinessProbe:
+            timeoutSeconds: 5
+            failureThreshold: 5
+          livenessProbe:
+            timeoutSeconds: 5
+            failureThreshold: 5
         replica:
           replicaCount: 2
           persistence:
             enabled: false
           podAntiAffinityPreset: hard
+          readinessProbe:
+            timeoutSeconds: 5
+            failureThreshold: 5
+          livenessProbe:
+            timeoutSeconds: 5
+            failureThreshold: 5
         sentinel:
           enabled: true
+          readinessProbe:
+            timeoutSeconds: 5
+            failureThreshold: 5
+          livenessProbe:
+            timeoutSeconds: 5
+            failureThreshold: 5
         haproxy:
           enabled: true
         metrics:
