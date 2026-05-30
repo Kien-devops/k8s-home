@@ -79,6 +79,15 @@ spec:
             limits:
               cpu: 150m
               memory: 128Mi
+          metrics:
+            enabled: true
+            resources:
+              requests:
+                cpu: 10m
+                memory: 32Mi
+              limits:
+                cpu: 50m
+                memory: 64Mi
 
         chunksCache:
           enabled: false
@@ -99,6 +108,15 @@ spec:
             enabled: false
           serviceMonitor:
             enabled: true
+
+        sidecar:
+          resources:
+            requests:
+              cpu: 10m
+              memory: 32Mi
+            limits:
+              cpu: 50m
+              memory: 64Mi
 
   destination:
     server: https://kubernetes.default.svc
