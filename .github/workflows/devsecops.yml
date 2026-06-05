@@ -366,7 +366,14 @@ jobs:
             --ignore-unfixed \
             "$NEXUS_DOCKER_REGISTRY/ecr-be:$IMAGE_TAG"
 
-          # Clean up local builds
+          # Clean up local builds and Docker images to save disk space
+          echo "Cleaning up local Docker images..."
+          docker rmi \
+            "$NEXUS_DOCKER_REGISTRY/ecr-fe:$IMAGE_TAG" \
+            "$NEXUS_DOCKER_REGISTRY/ecr-be:$IMAGE_TAG" \
+            "ecr-fe:$IMAGE_TAG" \
+            "ecr-be:$IMAGE_TAG" || true
+
           rm -rf "$ARTIFACT_DIR"
           EOF
 
