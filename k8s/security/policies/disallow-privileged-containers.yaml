@@ -21,7 +21,12 @@ spec:
           - resources:
               namespaces:
                 - cattle-system
+                - cattle-capi-system
+                - cattle-fleet-system
+                - fleet-local
                 - kube-system
+                - security
+                - monitoring
       validate:
         message: "Privileged containers are not allowed."
         pattern:

@@ -14,6 +14,7 @@ spec:
       values: |
         operator:
           scanJobsConcurrentLimit: 2
+          scanJobTTLSecondsAfterFinished: 120
         trivy:
           ignoreUnfixed: true
         trivyOperator:
