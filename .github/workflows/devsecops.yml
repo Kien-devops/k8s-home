@@ -140,9 +140,6 @@ jobs:
           ignore-unfixed: false
 
 
-      - name: Build backend
-        run: dotnet build "${{ env.BACKEND_PROJECT }}" --configuration Release --no-restore
-
       - name: Lint frontend
         working-directory: ${{ env.FRONTEND_DIR }}
         run: npm run lint
@@ -320,9 +317,10 @@ jobs:
           docker build --no-cache -t "ecr-fe:$IMAGE_TAG" -f "$ARTIFACT_DIR/Dockerfile.frontend" "$ARTIFACT_DIR"
           docker build --no-cache -t "ecr-be:$IMAGE_TAG" -f "$ARTIFACT_DIR/Dockerfile.backend" "$ARTIFACT_DIR"
 
-          # Scan local Docker images with Trivy before pushing
+          # Scan local Docker images with Trivy before pushing (using host cache to speed up database download)
           docker run --rm \
             -v /var/run/docker.sock:/var/run/docker.sock \
+            -v $HOME/.cache:/root/.cache \
             aquasec/trivy:0.56.2 image \
             --severity HIGH,CRITICAL \
             --exit-code 1 \
@@ -331,6 +329,7 @@ jobs:
 
           docker run --rm \
             -v /var/run/docker.sock:/var/run/docker.sock \
+            -v $HOME/.cache:/root/.cache \
             aquasec/trivy:0.56.2 image \
             --severity HIGH,CRITICAL \
             --exit-code 1 \
@@ -346,25 +345,6 @@ jobs:
           docker tag "ecr-be:$IMAGE_TAG" "$NEXUS_DOCKER_REGISTRY/ecr-be:$IMAGE_TAG"
           docker push "$NEXUS_DOCKER_REGISTRY/ecr-fe:$IMAGE_TAG"
           docker push "$NEXUS_DOCKER_REGISTRY/ecr-be:$IMAGE_TAG"
-
-          echo "Scanning pushed image from Nexus Docker Registry..."
-          docker run --rm \
-            -v /var/run/docker.sock:/var/run/docker.sock \
-            -v $HOME/.docker/config.json:/root/.docker/config.json \
-            aquasec/trivy:0.56.2 image \
-            --severity HIGH,CRITICAL \
-            --exit-code 1 \
-            --ignore-unfixed \
-            "$NEXUS_DOCKER_REGISTRY/ecr-fe:$IMAGE_TAG"
-
-          docker run --rm \
-            -v /var/run/docker.sock:/var/run/docker.sock \
-            -v $HOME/.docker/config.json:/root/.docker/config.json \
-            aquasec/trivy:0.56.2 image \
-            --severity HIGH,CRITICAL \
-            --exit-code 1 \
-            --ignore-unfixed \
-            "$NEXUS_DOCKER_REGISTRY/ecr-be:$IMAGE_TAG"
 
           # Clean up local builds and Docker images to save disk space
           echo "Cleaning up local Docker images..."
