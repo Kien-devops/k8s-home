@@ -316,9 +316,9 @@ jobs:
           EXPOSE 8000
           DOCKERFILE
 
-          # Build local Docker images
-          docker build -t "ecr-fe:$IMAGE_TAG" -f "$ARTIFACT_DIR/Dockerfile.frontend" "$ARTIFACT_DIR"
-          docker build -t "ecr-be:$IMAGE_TAG" -f "$ARTIFACT_DIR/Dockerfile.backend" "$ARTIFACT_DIR"
+          # Build local Docker images without caching to ensure the latest security packages are upgraded
+          docker build --no-cache -t "ecr-fe:$IMAGE_TAG" -f "$ARTIFACT_DIR/Dockerfile.frontend" "$ARTIFACT_DIR"
+          docker build --no-cache -t "ecr-be:$IMAGE_TAG" -f "$ARTIFACT_DIR/Dockerfile.backend" "$ARTIFACT_DIR"
 
           # Scan local Docker images with Trivy before pushing
           docker run --rm \
