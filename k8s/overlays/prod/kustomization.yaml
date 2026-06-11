@@ -17,7 +17,7 @@ replicas:
 images:
   - name: 100.112.150.56:8082/ecr-fe
     newName: 100.112.150.56:8082/ecr-fe
-    newTag: 0416808842983e2d4dfb71860a2fe2f4188cbd67
+    newTag: 7cf76e2d90d29dc6bd54691d6f332f3484f44216
   - name: 100.112.150.56:8082/ecr-be
     newName: 100.112.150.56:8082/ecr-be
-    newTag: 0416808842983e2d4dfb71860a2fe2f4188cbd67
+    newTag: 7cf76e2d90d29dc6bd54691d6f332f3484f44216
