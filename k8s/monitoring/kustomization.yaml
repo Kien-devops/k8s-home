@@ -4,4 +4,5 @@ kind: Kustomization
 resources:
   - namespace.yaml
   - rules/hospital-workload-alerts.yaml
+  - grafana-gateway-route.yaml
 
