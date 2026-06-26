@@ -22,10 +22,6 @@ resources:
   - ../applications/platform/falco.yaml
   - ../applications/platform/external-secrets.yaml
 
-  # Workload Applications (Development, Staging, Production)
-  - ../applications/workloads/hospital-frontend-dev.yaml
-  - ../applications/workloads/hospital-frontend-stag.yaml
+  # Workload Applications (Production Only)
   - ../applications/workloads/hospital-frontend-prod.yaml
-  - ../applications/workloads/hospital-backend-dev.yaml
-  - ../applications/workloads/hospital-backend-stag.yaml
   - ../applications/workloads/hospital-backend-prod.yaml

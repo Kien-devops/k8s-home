@@ -5,7 +5,5 @@ resources:
   - monitoring.yaml
   - logging.yaml
   - security.yaml
-  - hospital-dev.yaml
   - hospital-prod.yaml
-  - hospital-stag.yaml
   - external-secrets.yaml
