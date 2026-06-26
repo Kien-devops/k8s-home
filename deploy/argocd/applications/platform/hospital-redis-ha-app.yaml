@@ -1,10 +1,10 @@
 apiVersion: argoproj.io/v1alpha1
 kind: Application
 metadata:
-  name: redis
+  name: hospital-redis-ha-app
   namespace: argocd
   labels:
-    app.kubernetes.io/name: redis
+    app.kubernetes.io/name: hospital-redis-ha-app
     app.kubernetes.io/part-of: platform
 spec:
   project: platform

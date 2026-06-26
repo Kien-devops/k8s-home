@@ -2,7 +2,7 @@
 
 Redis is used by the Hospital backend as an ASP.NET Core distributed cache. The
 current production deployment is managed by Argo CD with the Bitnami Redis Helm
-chart at `argocd/hospital-redis-ha-app.yaml`.
+chart at `deploy/argocd/applications/platform/hospital-redis-ha-app.yaml`.
 
 The backend connects to the Kubernetes service:
 

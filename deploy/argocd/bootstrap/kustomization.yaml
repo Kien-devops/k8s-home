@@ -10,7 +10,7 @@ resources:
 
   # Platform Core Applications
   - ../applications/platform/traefik.yaml
-  - ../applications/platform/redis.yaml
+  - ../applications/platform/hospital-redis-ha-app.yaml
   - ../applications/platform/kube-prometheus-stack.yaml
   - ../applications/platform/monitoring-config.yaml
   - ../applications/platform/loki.yaml
