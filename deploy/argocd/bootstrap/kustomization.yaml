@@ -12,16 +12,15 @@ resources:
   - ../applications/platform/traefik.yaml
   - ../applications/platform/redis.yaml
   - ../applications/platform/kube-prometheus-stack.yaml
-  - ../applications/platform/kube-prometheus-stack-config.yaml
+  - ../applications/platform/monitoring-config.yaml
   - ../applications/platform/loki.yaml
   - ../applications/platform/promtail.yaml
   - ../applications/platform/logging-config.yaml
   - ../applications/platform/kyverno.yaml
-  - ../applications/platform/security-policies.yaml
+  - ../applications/platform/security-config.yaml
   - ../applications/platform/trivy-operator.yaml
   - ../applications/platform/falco.yaml
   - ../applications/platform/external-secrets.yaml
-  - ../applications/platform/external-secrets-config.yaml
 
   # Workload Applications (Development, Staging, Production)
   - ../applications/workloads/hospital-frontend-dev.yaml

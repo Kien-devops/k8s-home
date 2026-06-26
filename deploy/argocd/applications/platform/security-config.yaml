@@ -1,17 +1,17 @@
 apiVersion: argoproj.io/v1alpha1
 kind: Application
 metadata:
-  name: security-policies
+  name: security-config
   namespace: argocd
   labels:
-    app.kubernetes.io/name: security-policies
+    app.kubernetes.io/name: security-config
     app.kubernetes.io/part-of: platform
 spec:
   project: platform
   source:
     repoURL: https://github.com/Kien-devops/k8s-home.git
     targetRevision: main
-    path: deploy/platform/security/kyverno
+    path: deploy/platform/security
   destination:
     server: https://kubernetes.default.svc
     namespace: security

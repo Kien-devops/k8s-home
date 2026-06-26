@@ -11,7 +11,7 @@ spec:
   source:
     repoURL: https://github.com/Kien-devops/k8s-home.git
     targetRevision: main
-    path: deploy/platform/observability/loki
+    path: deploy/platform/observability/logging
   destination:
     server: https://kubernetes.default.svc
     namespace: logging
