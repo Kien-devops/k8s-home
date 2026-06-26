@@ -1,0 +1,40 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: trivy-operator
+  namespace: argocd
+  labels:
+    app.kubernetes.io/name: trivy-operator
+    app.kubernetes.io/part-of: platform
+spec:
+  project: platform
+  source:
+    repoURL: https://aquasecurity.github.io/helm-charts/
+    chart: trivy-operator
+    targetRevision: "0.31.0"
+    helm:
+      releaseName: trivy-operator
+      values: |
+        operator:
+          scanJobsConcurrentLimit: 2
+          scanJobTTLSecondsAfterFinished: 120
+        trivy:
+          ignoreUnfixed: true
+        trivyOperator:
+          scanJobTolerations:
+            - effect: NoSchedule
+              operator: Exists
+            - effect: NoExecute
+              operator: Exists
+        serviceMonitor:
+          enabled: true
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: security
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
+      - ServerSideApply=true

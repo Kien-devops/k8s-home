@@ -1,0 +1,88 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: hospital-frontend
+  labels:
+    app.kubernetes.io/name: hospital-frontend
+    app.kubernetes.io/component: frontend
+    app.kubernetes.io/part-of: hospital
+    app.kubernetes.io/managed-by: argocd
+    app.kubernetes.io/version: 1.0.0
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: hospital-frontend
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: hospital-frontend
+        app.kubernetes.io/component: frontend
+        app.kubernetes.io/part-of: hospital
+        app.kubernetes.io/managed-by: argocd
+        app.kubernetes.io/version: 1.0.0
+    spec:
+      imagePullSecrets:
+        - name: nexus-registry-secret
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+            - weight: 100
+              podAffinityTerm:
+                labelSelector:
+                  matchLabels:
+                    app.kubernetes.io/name: hospital-frontend
+                topologyKey: kubernetes.io/hostname
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 101
+        fsGroup: 2000
+      volumes:
+        - name: nginx-cache
+          emptyDir: {}
+        - name: nginx-run
+          emptyDir: {}
+        - name: tmp
+          emptyDir: {}
+      containers:
+        - name: hospital-frontend
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop:
+                - ALL
+          image: 100.112.150.56:8082/ecr-fe:latest
+          imagePullPolicy: Always
+          ports:
+            - containerPort: 8000
+          volumeMounts:
+            - name: nginx-cache
+              mountPath: /var/cache/nginx
+            - name: nginx-run
+              mountPath: /var/run
+            - name: tmp
+              mountPath: /tmp
+          readinessProbe:
+            httpGet:
+              path: /
+              port: 8000
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /
+              port: 8000
+            periodSeconds: 20
+          startupProbe:
+            httpGet:
+              path: /
+              port: 8000
+            periodSeconds: 5
+            failureThreshold: 12
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              cpu: 250m
+              memory: 256Mi

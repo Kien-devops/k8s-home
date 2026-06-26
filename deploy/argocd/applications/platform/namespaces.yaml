@@ -1,0 +1,21 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: namespaces
+  namespace: argocd
+  labels:
+    app.kubernetes.io/name: namespaces
+    app.kubernetes.io/part-of: platform
+spec:
+  project: platform
+  source:
+    repoURL: https://github.com/Kien-devops/k8s-home.git
+    targetRevision: main
+    path: deploy/platform/namespaces
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: argocd
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true

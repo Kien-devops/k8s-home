@@ -13,8 +13,8 @@ permissions:
 env:
   DOTNET_VERSION: "9.0.x"
   NODE_VERSION: "20"
-  BACKEND_PROJECT: hospital_BE/Hospital_API/Hospital_API.csproj
-  FRONTEND_DIR: hospital_FE
+  BACKEND_PROJECT: apps/backend/Hospital_API/Hospital_API.csproj
+  FRONTEND_DIR: apps/frontend
   REPO_DIR: /home/monitor/k8s-home
   REPO_URL: https://github.com/Kien-devops/k8s-home.git
   NEXUS_DOCKER_REGISTRY: 100.112.150.56:8082
@@ -22,8 +22,8 @@ env:
   IMAGE_TAG: ${{ github.sha }}
   BRANCH_NAME: ${{ github.ref_name }}
   K8S_ENV: ${{ github.ref_name == 'main' && 'prod' || github.ref_name == 'stag' && 'stag' || 'dev' }}
-  K8S_OVERLAY: k8s/overlays/${{ github.ref_name == 'main' && 'prod' || github.ref_name == 'stag' && 'stag' || 'dev' }}
-  K8S_KUSTOMIZATION: k8s/overlays/${{ github.ref_name == 'main' && 'prod' || github.ref_name == 'stag' && 'stag' || 'dev' }}/kustomization.yaml
+  FE_KUSTOMIZATION: deploy/workloads/hospital-frontend/overlays/${{ github.ref_name == 'main' && 'prod' || github.ref_name == 'stag' && 'stag' || 'dev' }}/kustomization.yaml
+  BE_KUSTOMIZATION: deploy/workloads/hospital-backend/overlays/${{ github.ref_name == 'main' && 'prod' || github.ref_name == 'stag' && 'stag' || 'dev' }}/kustomization.yaml
   NEXUS_RAW_REPOSITORY: hospital-artifacts
   NEXUS_NUGET_REPOSITORY: nuget-group
   NEXUS_NPM_REPOSITORY: npm-group
@@ -59,7 +59,7 @@ jobs:
         with:
           node-version: ${{ env.NODE_VERSION }}
           cache: npm
-          cache-dependency-path: hospital_FE/package-lock.json
+          cache-dependency-path: apps/frontend/package-lock.json
 
       - name: Configure Nexus dependency cache
         shell: bash
@@ -131,7 +131,7 @@ jobs:
             /k:"k8s-home" \
             /d:sonar.host.url="$SONAR_HOST_URL" \
             /d:sonar.token="$SONAR_TOKEN" \
-            /d:sonar.exclusions="hospital_FE/public/js/plugins.js"
+            /d:sonar.exclusions="apps/frontend/public/js/plugins.js"
 
           dotnet build "${{ env.BACKEND_PROJECT }}" --configuration Release --no-restore
 
@@ -385,11 +385,16 @@ jobs:
           
           TARGET_REGISTRY="${{ env.NEXUS_DOCKER_REGISTRY }}"
 
-          echo "Updating ${K8S_ENV} Kubernetes overlay at ${K8S_KUSTOMIZATION} with registry: ${TARGET_REGISTRY}"
+          echo "Updating ${K8S_ENV} Kubernetes frontend overlay at ${FE_KUSTOMIZATION} and backend overlay at ${BE_KUSTOMIZATION} with registry: ${TARGET_REGISTRY} and tag: ${IMAGE_TAG}"
           
-          # Dynamically replace newName and newTag matching by name prefix
-          sed -i "/name: .*ecr-fe/{n;s|newName: .*|newName: ${TARGET_REGISTRY}/ecr-fe|;n;s|newTag: .*|newTag: ${IMAGE_TAG}|;}" "$K8S_KUSTOMIZATION"
-          sed -i "/name: .*ecr-be/{n;s|newName: .*|newName: ${TARGET_REGISTRY}/ecr-be|;n;s|newTag: .*|newTag: ${IMAGE_TAG}|;}" "$K8S_KUSTOMIZATION"
+          # Use kustomize edit set image to update overlays cleanly
+          cd "$(dirname "${FE_KUSTOMIZATION}")"
+          kustomize edit set image 100.112.150.56:8082/ecr-fe="${TARGET_REGISTRY}/ecr-fe:${IMAGE_TAG}"
+          cd -
+
+          cd "$(dirname "${BE_KUSTOMIZATION}")"
+          kustomize edit set image 100.112.150.56:8082/ecr-be="${TARGET_REGISTRY}/ecr-be:${IMAGE_TAG}"
+          cd -
 
       - name: Commit and push updated manifests
         shell: bash
@@ -397,7 +402,7 @@ jobs:
           set -euo pipefail
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add "$K8S_KUSTOMIZATION"
+          git add "${FE_KUSTOMIZATION}" "${BE_KUSTOMIZATION}"
 
           if git diff --cached --quiet; then
             echo "No manifest image tag or registry changes to commit."

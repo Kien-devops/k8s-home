@@ -1,0 +1,37 @@
+apiVersion: argoproj.io/v1alpha1
+kind: AppProject
+metadata:
+  name: hospital
+  namespace: argocd
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  description: "Hospital application workload deployments"
+  sourceRepos:
+    - "https://github.com/Kien-devops/k8s-home.git"
+  destinations:
+    - server: "https://kubernetes.default.svc"
+      namespace: hospital-dev
+    - server: "https://kubernetes.default.svc"
+      namespace: hospital-prod
+    - server: "https://kubernetes.default.svc"
+      namespace: hospital-stag
+  namespaceResourceWhitelist:
+    - group: "apps"
+      kind: "Deployment"
+    - group: ""
+      kind: "Service"
+    - group: ""
+      kind: "ConfigMap"
+    - group: ""
+      kind: "Secret"
+    - group: "autoscaling"
+      kind: "HorizontalPodAutoscaler"
+    - group: "networking.k8s.io"
+      kind: "NetworkPolicy"
+    - group: "external-secrets.io"
+      kind: "ExternalSecret"
+    - group: "gateway.networking.k8s.io"
+      kind: "HTTPRoute"
+    - group: "gateway.networking.k8s.io"
+      kind: "Gateway"

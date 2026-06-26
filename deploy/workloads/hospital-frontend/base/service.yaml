@@ -1,0 +1,15 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: hospital-frontend
+  labels:
+    app.kubernetes.io/name: hospital-frontend
+    app.kubernetes.io/component: frontend
+    app.kubernetes.io/part-of: hospital
+spec:
+  selector:
+    app.kubernetes.io/name: hospital-frontend
+  ports:
+    - protocol: TCP
+      port: 80
+      targetPort: 8000

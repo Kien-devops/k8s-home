@@ -1,0 +1,23 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: hospital-frontend-dev
+  namespace: argocd
+  labels:
+    app.kubernetes.io/name: hospital-frontend
+    app.kubernetes.io/part-of: hospital
+spec:
+  project: hospital
+  source:
+    repoURL: https://github.com/Kien-devops/k8s-home.git
+    targetRevision: main
+    path: deploy/workloads/hospital-frontend/overlays/dev
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: hospital-dev
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true

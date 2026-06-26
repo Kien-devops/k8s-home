@@ -1,0 +1,44 @@
+apiVersion: argoproj.io/v1alpha1
+kind: AppProject
+metadata:
+  name: platform
+  namespace: argocd
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  description: "Platform engineering and cluster infrastructure services"
+  sourceRepos:
+    - "https://github.com/Kien-devops/k8s-home.git"
+    - "https://charts.bitnami.com/bitnami"
+    - "https://prometheus-community.github.io/helm-charts"
+    - "https://grafana-community.github.io/helm-charts"
+    - "https://grafana.github.io/helm-charts"
+    - "https://kyverno.github.io/kyverno/"
+    - "https://aquasecurity.github.io/helm-charts/"
+    - "https://falcosecurity.github.io/charts"
+    - "https://charts.external-secrets.io"
+  destinations:
+    - server: "https://kubernetes.default.svc"
+      namespace: traefik
+    - server: "https://kubernetes.default.svc"
+      namespace: monitoring
+    - server: "https://kubernetes.default.svc"
+      namespace: logging
+    - server: "https://kubernetes.default.svc"
+      namespace: security
+    - server: "https://kubernetes.default.svc"
+      namespace: external-secrets
+    - server: "https://kubernetes.default.svc"
+      namespace: hospital-dev
+    - server: "https://kubernetes.default.svc"
+      namespace: hospital-prod
+    - server: "https://kubernetes.default.svc"
+      namespace: hospital-stag
+    - server: "https://kubernetes.default.svc"
+      namespace: argocd
+  clusterResourceWhitelist:
+    - group: "*"
+      kind: "*"
+  namespaceResourceWhitelist:
+    - group: "*"
+      kind: "*"
