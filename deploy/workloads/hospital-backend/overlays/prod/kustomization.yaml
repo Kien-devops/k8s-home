@@ -3,8 +3,9 @@ kind: Kustomization
 namespace: hospital-prod
 resources:
   - ../../base
-  - external-secrets.yaml
+  - vault-serviceaccount.yaml
   - vault-secretstore.yaml
+  - external-secrets.yaml
 patches:
   - path: patch-deployment.yaml
 images:
