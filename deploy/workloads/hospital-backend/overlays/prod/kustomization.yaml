@@ -4,6 +4,7 @@ namespace: hospital-prod
 resources:
   - ../../base
   - external-secrets.yaml
+  - vault-secretstore.yaml
 patches:
   - path: patch-deployment.yaml
 images:
