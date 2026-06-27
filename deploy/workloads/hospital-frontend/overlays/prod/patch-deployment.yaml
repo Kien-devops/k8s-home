@@ -3,4 +3,4 @@ kind: Deployment
 metadata:
   name: hospital-frontend
 spec:
-  replicas: 3
+  replicas: 2
