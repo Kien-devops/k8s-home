@@ -40,7 +40,7 @@ flowchart TB
   gha --> manifest[Update Kubernetes image tags in Git via Kustomize]
   manifest --> argocd[Argo CD Root App-of-Apps]
   argocd --> k8s[On-Premise K8s]
-  aws[AWS Secrets Manager] -. ESO syncs secrets .-> k8s
+  vault[HashiCorp Vault] -. ESO syncs secrets .-> k8s
 
   k8s --> fe[Frontend pods]
   k8s --> be[Backend API pods]
@@ -157,7 +157,7 @@ The GitHub Actions pipeline `.github/workflows/devsecops.yml` runs on pushes to 
 * **On-Premise Cluster**: Kubernetes cluster with `kubectl` access.
 * **VPN**: Tailscale installed and active on the runner, build host, and cluster.
 * **Dependency Managers**: Node.js 20 & .NET SDK 9 for local testing.
-* **Secrets Manager**: AWS CLI configured to create parameters.
+* **Secrets Manager**: HashiCorp Vault server with Kubernetes auth configured.
 
 ---
 
@@ -199,52 +199,45 @@ Required repositories to create in Nexus:
 
 ---
 
-## Enterprise Secrets Management (AWS SM + ESO)
+## Enterprise Secrets Management (HashiCorp Vault + ESO)
 
-Application secrets are managed in AWS Secrets Manager and synchronized automatically in the cluster using the External Secrets Operator.
+Application secrets are managed in HashiCorp Vault (KV Secrets Engine v2) and synchronized automatically in the cluster using the External Secrets Operator.
 
-### Step 1: Create AWS Secrets Manager parameters
+### Step 1: Populate Secrets in HashiCorp Vault
+
+Create the 5 required secrets in Vault at the paths corresponding to the ExternalSecret configurations:
 
 ```bash
 # 1. Database Connection String
-aws secretsmanager create-secret \
-  --name hospital-be-db \
-  --secret-string '{"default-connection":"Server=YOUR_DB_IP;Database=HospitalDB;User Id=sa;Password=YOUR_PASSWORD;TrustServerCertificate=True"}' \
-  --region us-east-1
+vault kv put secret/hospital/be-db \
+  default-connection="Server=YOUR_DB_IP;Database=HospitalDB;User Id=sa;Password=YOUR_PASSWORD;TrustServerCertificate=True"
 
 # 2. Redis Password
-aws secretsmanager create-secret \
-  --name hospital-be-redis \
-  --secret-string '{"password":"<redis-password>"}' \
-  --region us-east-1
+vault kv put secret/hospital/be-redis \
+  password="<redis-password>"
 
 # 3. JWT Signing Key
-aws secretsmanager create-secret \
-  --name hospital-be-jwt \
-  --secret-string '{"secret":"<jwt-secret-key>"}' \
-  --region us-east-1
+vault kv put secret/hospital/be-jwt \
+  secret="<jwt-secret-key>"
 
 # 4. Redis HA Sentinel Auth
-aws secretsmanager create-secret \
-  --name hospital-redis-auth \
-  --secret-string '{"password":"<redis-password>"}' \
-  --region us-east-1
+vault kv put secret/hospital/redis-auth \
+  password="<redis-password>"
 
 # 5. Nexus Docker Registry Credentials
-aws secretsmanager create-secret \
-  --name hospital-nexus-registry \
-  --secret-string '{"username":"<nexus-username>","password":"<nexus-password>"}' \
-  --region us-east-1
+vault kv put secret/hospital/nexus-registry \
+  username="<nexus-username>" \
+  password="<nexus-password>"
 ```
 
 ### Step 2: Bootstrap via GitOps
-After creating AWS secrets and setting up AWS credentials in the cluster (`awssm-secret` in `external-secrets` namespace), Argo CD will automatically apply the `ClusterSecretStore` and individual `ExternalSecret` manifests.
+Argo CD will deploy the namespaced `ServiceAccount` (`hospital-vault-auth`) and `SecretStore` (`vault-backend`) which uses Kubernetes authentication with custom token audience projection to securely access Vault.
 
 Verify sync status:
 ```bash
 kubectl get externalsecret -n hospital-prod
 ```
-All secrets should report `SecretSynced = True`.
+All secrets should report `SecretSynced = True` and status `Ready = True`.
 
 ---
 
@@ -289,16 +282,16 @@ Before committing pipeline triggers:
 | SSH authentication failed | Tailscale SSH ACL block | Ensure Tailscale ACL authorizes runners to SSH to `monitor`. |
 | `could not read Username` in CI | Invalid Git credentials | Check `GIT_USERNAME` and `GIT_PASSWORD` PAT values. |
 | Trivy reports HIGH/CRITICAL | Vuln in base package | Update packages inside Dockerfiles or upgrade base images. |
-| ImagePullBackOff on Pods | Registry credentials error | Check `nexus-registry-secret` creation and AWS SM syncing. |
+| ImagePullBackOff on Pods | Registry credentials error | Check `nexus-registry-secret` creation and Vault syncing. |
 | Argo CD Redis `i/o timeout` | Default NetPol blocking | Run `kubectl delete networkpolicy --all -n argocd`. |
 | Redis Connection Timeout | Bad redis endpoint config | Set Redis string to `hospital-redis-ha:6379`. |
-| BE CreateContainerConfigError | Missing secrets in K8s | Ensure ESO has synchronized all 5 Secrets Manager keys. |
+| BE CreateContainerConfigError | Missing secrets in K8s | Ensure ESO has synchronized all 5 Vault secrets. |
 
 ---
 
 ## Security Practices Used
 
-* **Zero Hardcoded Secrets**: Secrets are kept exclusively in AWS Secrets Manager and synced dynamically.
+* **Zero Hardcoded Secrets**: Secrets are kept exclusively in HashiCorp Vault and synced dynamically.
 * **Strict AppProject Whitelisting**: The hospital application cannot deploy cluster-wide configurations.
 * **Restricted Pod Security Standard**: Namespaces are labeled to enforce the `restricted` pod security standard.
 * **Non-Root Runtime**: Containers run as non-root users (UID 101 for frontend, UID 1654 for backend).
