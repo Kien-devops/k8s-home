@@ -4,4 +4,3 @@ resources:
   - disallow-privileged-containers.yaml
   - require-resource-limits.yaml
   - require-run-as-non-root.yaml
-  - cluster-secret-store.yaml
