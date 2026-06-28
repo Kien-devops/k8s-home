@@ -30,7 +30,7 @@ spec:
           grafana.ini:
             database:
               type: postgres
-              host: grafana-db:5432
+              host: grafana-db-v2:5432
               name: grafana
               user: grafana
               password: $__env{GF_DATABASE_PASSWORD}

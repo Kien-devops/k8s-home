@@ -1,17 +1,17 @@
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: grafana-db
+  name: grafana-db-v2
   namespace: monitoring
 spec:
   replicas: 1
   selector:
     matchLabels:
-      app: grafana-db
+      app: grafana-db-v2
   template:
     metadata:
       labels:
-        app: grafana-db
+        app: grafana-db-v2
     spec:
       containers:
         - name: postgres
@@ -42,16 +42,16 @@ spec:
       volumes:
         - name: db-data
           persistentVolumeClaim:
-            claimName: grafana-db-pvc
+            claimName: grafana-db-pvc-v2
 ---
 apiVersion: v1
 kind: Service
 metadata:
-  name: grafana-db
+  name: grafana-db-v2
   namespace: monitoring
 spec:
   ports:
     - port: 5432
       targetPort: 5432
   selector:
-    app: grafana-db
+    app: grafana-db-v2
