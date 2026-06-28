@@ -9,9 +9,9 @@
 ![Loki](https://img.shields.io/badge/Loki-Logs-F46800?logo=grafana&logoColor=white)
 ![Kyverno](https://img.shields.io/badge/Kyverno-Policies-326CE5?logo=kubernetes&logoColor=white)
 
-This folder contains the Kubernetes runtime manifests deployed by Argo CD.
+This folder explains the Kubernetes manifests located in the `deploy/` directory, which are deployed and managed by Argo CD GitOps.
 
-The `k8s/` folder is the runtime layer. It contains resources that run in, or configure things inside, the Kubernetes cluster. Argo CD Application manifests live in `argocd/`.
+The `deploy/` folder acts as the GitOps repository layout, housing platform components under `deploy/platform/` and workloads under `deploy/workloads/`.
 
 ![Kubernetes runtime overview](./image.png)
 
@@ -19,27 +19,29 @@ The `k8s/` folder is the runtime layer. It contains resources that run in, or co
 
 | Topic | Where it appears |
 |---|---|
-| Application runtime | `k8s/base` |
-| Redis HA cache operations | `k8s/redis` |
-| Environment overlays | `k8s/overlays/dev`, `k8s/overlays/stag`, `k8s/overlays/prod` |
-| Cluster security configuration | `k8s/security` |
-| Cluster monitoring configuration | `k8s/monitoring` |
-| Cluster logging configuration | `k8s/logging` |
-| GitOps installer layer | `argocd/` |
+| Frontend workload & overlays | `deploy/workloads/hospital-frontend/` |
+| Backend workload & overlays | `deploy/workloads/hospital-backend/` |
+| Redis HA caching stack | `deploy/platform/caching/redis/` |
+| Ingress configuration (Traefik Gateway) | `deploy/platform/ingress/traefik/` |
+| Cluster security configuration | `deploy/platform/security/` |
+| Cluster monitoring configuration | `deploy/platform/observability/monitoring/` |
+| Cluster logging configuration | `deploy/platform/observability/logging/` and `/promtail/` |
+| Centralized Namespaces | `deploy/platform/namespaces/` |
+| GitOps installer layer | `deploy/argocd/` |
 
 ## Architecture
 
 ```mermaid
 flowchart TB
-  argocd[Argo CD] --> kustomize[kustomize build k8s/overlays/env]
+  argocd[Argo CD] --> kustomize[kustomize build deploy/workloads/hospital-*/overlays/env]
   kustomize --> ns[hospital-dev/stag/prod namespace]
   ns --> fe[Frontend Deployment]
   ns --> be[Backend Deployment]
   fe --> fesvc[Frontend Service]
   be --> besvc[Backend Service]
-  be --> secret[be-db-secret]
+  be --> secret[be-db-secret (synced via ESO from Vault)]
   ns --> np[Network Policies]
-  ingress[Traefik/Gateway] --> fesvc
+  ingress[Traefik Gateway] --> fesvc
   ingress --> besvc
 ```
 
@@ -62,101 +64,84 @@ sequenceDiagram
 ## Structure
 
 ```text
-k8s/
-  base/
-    kustomization.yaml
-    05-fe-deployment.yaml
-    06-fe-service.yaml
-    07-be-deployment.yaml
-    08-be-service.yaml
-    10-network-policy.yaml
-  redis/                  # Redis HA cache notes and secret examples
-    README.md
-    redis-auth-secret.example.yaml
-    backend-redis-secret.example.yaml
-  overlays/
-    dev/
-      namespace.yaml
-      kustomization.yaml
-    stag/
-      namespace.yaml
-      kustomization.yaml
-    prod/
-      namespace.yaml
-      kustomization.yaml
-  secrets/
-    default-connection.txt.example
-  security/
-    namespace.yaml
-    policies/
-  monitoring/
-    namespace.yaml
-    rules/
-  logging/
-    namespace.yaml
-    grafana-loki-datasource.yaml
+deploy/
+  argocd/                 # Argo CD applications and projects configurations
+    bootstrap/            # Root bootstrap app
+    projects/             # AppProjects
+    applications/         # Independent platform & workload application definitions
+  platform/               # Cluster-wide infrastructure resources
+    namespaces/           # Namespaces definition
+    ingress/              # Traefik configuration
+    caching/              # Redis HA configuration
+    observability/        # Monitoring, Logging, Promtail configuration
+    security/             # Kyverno policies, Trivy Operator, Falco configuration
+  workloads/              # Application workload configurations
+    hospital-frontend/    # Frontend React app manifests
+      base/               # Standard frontend deployment & service
+      overlays/           # Environment overrides (dev, stag, prod)
+    hospital-backend/     # Backend ASP.NET Core app manifests
+      base/               # Standard backend deployment & service
+      overlays/           # Environment overrides (dev, stag, prod)
 ```
 
 ## Runtime Responsibility
 
-| Path | Purpose | Installed or synced by |
+| Path | Purpose | Managed/Synced by Argo CD App |
 |---|---|---|
-| `k8s/base` | Hospital frontend/backend runtime resources. | `argocd/hospital-traefik-app.yaml` |
-| `k8s/redis` | Redis HA cache notes, troubleshooting, and secret examples. | `argocd/hospital-redis-ha-app.yaml` |
-| `k8s/overlays/*` | Environment-specific replica/image overrides. | Manual apply or future environment-specific Argo CD apps. |
-| `k8s/security` | Kyverno policies and security namespace. | `argocd/security/00-security-namespace-policies-app.yaml` |
-| `k8s/monitoring` | Prometheus rules and monitoring namespace. | `argocd/monitoring/20-monitoring-rules-app.yaml` |
-| `k8s/logging` | Logging namespace and Grafana Loki datasource. | `argocd/logging/30-logging-config-app.yaml` |
+| `deploy/workloads/hospital-frontend` | Frontend deployment overlays. | `hospital-frontend-prod` |
+| `deploy/workloads/hospital-backend` | Backend deployment overlays & secrets sync. | `hospital-backend-prod` |
+| `deploy/platform/caching/redis` | Redis HA configuration, backup CronJobs & secrets examples. | `hospital-redis-ha` |
+| `deploy/platform/security` | Kyverno policies and security configs. | `security-config` |
+| `deploy/platform/observability/monitoring` | Prometheus rules and Monitoring Gateway Routes. | `monitoring-config` |
+| `deploy/platform/observability/logging` | Grafana Loki datasource configuration. | `logging-config` |
 
 ## Environments
 
-| Environment | Path | Namespace | Replicas |
+| Environment | Overlay Path | Namespace | Replicas |
 |---|---|---|---|
-| dev | `k8s/overlays/dev` | `hospital-dev` | 1 frontend, 1 backend |
-| stag | `k8s/overlays/stag` | `hospital-stag` | 2 frontend, 2 backend |
-| prod | `k8s/overlays/prod` | `hospital-prod` | 3 frontend, 3 backend |
+| dev | `deploy/workloads/hospital-*/overlays/dev` | `hospital-dev` | 1 frontend, 1 backend |
+| stag | `deploy/workloads/hospital-*/overlays/stag` | `hospital-stag` | 2 frontend, 2 backend |
+| prod | `deploy/workloads/hospital-*/overlays/prod` | `hospital-prod` | 3 frontend, 3 backend |
 
-## Apply Manually
+## Apply Manually (Fallback / Testing)
 
 ```bash
-kubectl apply -k k8s/overlays/dev
-kubectl apply -k k8s/overlays/stag
-kubectl apply -k k8s/overlays/prod
+kubectl apply -k deploy/workloads/hospital-frontend/overlays/dev
+kubectl apply -k deploy/workloads/hospital-backend/overlays/dev
 ```
 
 ## Required Secrets
 
-Create these before deploying the backend:
+To maintain security and GitOps compliance, secrets are not checked into Git. Instead, the project uses **HashiCorp Vault** as the central secrets engine, and the **External Secrets Operator (ESO)** automatically synchronizes them into the cluster as Kubernetes secrets (e.g. `be-db-secret`, `redis-auth-secret`, `nexus-registry-secret`).
+
+See [k8s-SETUP.md](file:///e:/O%20D/project%2003/k8s-home/docs/k8s-SETUP.md) for full instructions on configuring Vault and secrets synchronization.
+
+### Manual Secrets Creation (Local Testing / Fallback)
+
+If you are testing locally and need to bootstrap the dev secrets manually without Vault:
 
 ```bash
-cp k8s/secrets/default-connection.txt.example k8s/secrets/default-connection.txt
-vi k8s/secrets/default-connection.txt
-
-# Create namespace
-kubectl apply -f k8s/overlays/dev/namespace.yaml
+# Create namespace first
+kubectl apply -f deploy/platform/namespaces/hospital-dev.yaml
 
 # Create database connection secret
 kubectl -n hospital-dev create secret generic be-db-secret \
-  --from-file=default-connection=k8s/secrets/default-connection.txt \
-  --dry-run=client -o yaml | kubectl apply -f -
+  --from-literal=default-connection="Server=<DB_IP>;Database=HospitalDB;User Id=sa;Password=<DB_PASSWORD>;TrustServerCertificate=True"
 
 # Create Redis password secrets
 kubectl -n hospital-dev create secret generic redis-auth-secret \
-  --from-literal=password='<strong-redis-password>' \
-  --dry-run=client -o yaml | kubectl apply -f -
+  --from-literal=password='<strong-redis-password>'
 
 kubectl -n hospital-dev create secret generic be-redis-secret \
-  --from-literal=password='<strong-redis-password>' \
-  --dry-run=client -o yaml | kubectl apply -f -
-```
+  --from-literal=password='<strong-redis-password>'
 
-`k8s/secrets/default-connection.txt` is ignored by Git. Keep the real host, database name, user, and password only in that local file or in your cluster secret manager.
+# Create JWT secret
+kubectl -n hospital-dev create secret generic be-jwt-secret \
+  --from-literal=secret='<jwt-secret-key>'
 
-Create the image pull secret to authenticate against the internal Nexus Docker Registry:
-
-```bash
+# Create Nexus Image Pull Secret
 kubectl -n hospital-dev create secret docker-registry nexus-registry-secret \
-  --docker-server=100.114.175.75:8082 \
+  --docker-server=100.112.150.56:8082 \
   --docker-username=<nexus-username> \
   --docker-password=<nexus-password>
 ```
@@ -165,6 +150,6 @@ kubectl -n hospital-dev create secret docker-registry nexus-registry-secret \
 
 ```bash
 kubectl get pods,svc -n hospital-dev
-kubectl describe deploy be-deployment-v1 -n hospital-dev
-kubectl describe deploy fe-deployment-v1 -n hospital-dev
+kubectl describe deployment hospital-backend -n hospital-dev
+kubectl describe deployment hospital-frontend -n hospital-dev
 ```

@@ -19,7 +19,21 @@ spec:
 
         grafana:
           enabled: true
+          replicaCount: 3
           defaultDashboardsEnabled: true
+          env:
+            GF_DATABASE_PASSWORD:
+              valueFrom:
+                secretKeyRef:
+                  name: grafana-db-secret
+                  key: password
+          grafana.ini:
+            database:
+              type: postgres
+              host: grafana-db:5432
+              name: grafana
+              user: grafana
+              password: $__env{GF_DATABASE_PASSWORD}
           sidecar:
             datasources:
               enabled: true

@@ -26,9 +26,9 @@ This folder contains the security servers and scan tooling used by the Hospital 
 
 | Tool | Path | Purpose |
 |---|---|---|
-| SonarQube | `sonarqube/` | Static analysis, code quality, security hotspots, quality gates. |
-| Nexus Repository | `nexus/` | Private artifact repository and dependency proxy. |
-| Trivy | `trivy/` | Vulnerability, secret, and container image scanning. |
+| SonarQube | `services/sonarqube/` | Static analysis, code quality, security hotspots, quality gates. |
+| Nexus Repository | `services/nexus/` | Private artifact repository and dependency proxy. |
+| Trivy | `services/trivy/` | Vulnerability, secret, and container image scanning. |
 
 ## Architecture
 
@@ -80,7 +80,7 @@ sequenceDiagram
 ## Quick Start
 
 ```bash
-cd security
+cd services
 docker compose up -d
 docker compose ps
 ```
@@ -101,10 +101,10 @@ To expose these services securely across your private network, utilize Tailscale
 
 | File | Purpose |
 |---|---|
-| `security/.env` | Docker Compose ports and SonarQube database settings. |
-| `security/sonarqube/.env` | SonarQube URL/token placeholders. |
-| `security/nexus/.env` | Nexus URL and credential placeholders. |
-| `security/trivy/.env` | Trivy scan policy placeholders. |
+| `services/.env` or `.env.example` | Docker Compose ports and SonarQube database settings. |
+| `services/sonarqube/.env` | SonarQube URL/token placeholders. |
+| `services/nexus/.env` | Nexus URL and credential placeholders. |
+| `services/trivy/.env` | Trivy scan policy placeholders. |
 
 Use real secrets in GitHub Actions secrets or a local secret store for production.
 
@@ -147,8 +147,8 @@ Minimum policy:
 
 ## Documentation
 
-- `sonarqube/README.md`
-- `nexus/README.md`
-- `trivy/README.md`
-- `HARDENING.md`
-- `SETUP.md`
+- `services/sonarqube/README.md`
+- `services/nexus/README.md`
+- `services/trivy/README.md`
+- `security-HARDENING.md`
+- `security-SETUP.md`

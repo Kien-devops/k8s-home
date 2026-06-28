@@ -5,7 +5,7 @@
 SSH vào monitor server và chạy:
 
 ```bash
-cd ~/k8s-home/security && chmod +x setup.sh && ./setup.sh
+cd ~/k8s-home && chmod +x scripts/setup-security-services.sh && ./scripts/setup-security-services.sh
 ```
 
 ## Full Manual Setup
@@ -40,7 +40,7 @@ sudo sysctl --system
 ### 2. Create Environment Files
 
 ```bash
-cd ~/k8s-home/security
+cd ~/k8s-home/services
 
 # Root .env (Docker Compose)
 cat > .env << 'EOF'
@@ -80,7 +80,7 @@ EOF
 ### 3. Start Services
 
 ```bash
-cd ~/k8s-home/security
+cd ~/k8s-home/services
 docker compose up -d
 docker compose ps
 ```
@@ -118,10 +118,10 @@ docker exec -it nexus cat /nexus-data/admin.password
 After Nexus is running and password is changed:
 
 ```bash
-# Update nexus/.env with real credentials first
-cd ~/k8s-home/security
-chmod +x create-nexus-repos.sh
-./create-nexus-repos.sh
+# Update services/nexus/.env with real credentials first
+cd ~/k8s-home
+chmod +x scripts/create-nexus-repos.sh
+./scripts/create-nexus-repos.sh
 ```
 
 ### 7. Install Trivy on Host
@@ -151,6 +151,7 @@ Add these secrets to your GitHub repository:
 ## Stop
 
 ```bash
+cd ~/k8s-home/services
 docker compose down
 ```
 
@@ -158,14 +159,15 @@ docker compose down
 
 Back up these Docker volumes before upgrades:
 
-- `security_sonarqube-db-data`
-- `security_sonarqube-data`
-- `security_sonarqube-extensions`
-- `security_nexus-data`
+- `services_sonarqube-db-data`
+- `services_sonarqube-data`
+- `services_sonarqube-extensions`
+- `services_nexus-data`
 
 ## Verify
 
 ```bash
+cd ~/k8s-home/services
 docker compose ps
 curl -s http://localhost:9000/api/system/status
 curl -s http://localhost:8081/service/rest/v1/status

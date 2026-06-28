@@ -86,23 +86,21 @@ Required before syncing the hospital app:
 kubectl apply -f https://github.com/kubernetes-sigs/gateway-api/releases/download/v1.3.0/standard-install.yaml
 ```
 
-## 7. Deploy All ArgoCD Applications
+## 7. Deploy All ArgoCD Applications (Bootstrap)
+
+To bootstrap the entire platform (including all workloads, ingress, security, monitoring, and logging applications), apply the Root Application:
 
 ```bash
-# Core hospital app
-kubectl apply -f argocd/hospital-traefik-app.yaml
-kubectl apply -f argocd/redis-app.yaml
-kubectl apply -f argocd/storage-app.yaml
-
-# Monitoring (Prometheus + Grafana + Alertmanager)
-kubectl apply -f argocd/monitoring/
-
-# Logging (Loki + Promtail)
-kubectl apply -f argocd/logging/
-
-# Security (Kyverno, Trivy Operator, Falco, ESO)
-kubectl apply -f argocd/security/
+kubectl apply -f deploy/argocd/bootstrap/root-app.yaml
 ```
+
+Alternatively, you can apply the bootstrap kustomization directly:
+
+```bash
+kubectl apply -k deploy/argocd/bootstrap/
+```
+
+This will automatically trigger Argo CD to create and synchronize all the platform and workload applications listed in `deploy/argocd/bootstrap/kustomization.yaml`.
 
 ## 8. Verify All Apps
 
@@ -110,23 +108,25 @@ kubectl apply -f argocd/security/
 kubectl get application -n argocd
 ```
 
-Expected: 13 applications, all `Synced` and `Healthy`.
+Expected: 15 applications (plus the `root-app` if bootstrapped via `root-app.yaml`), all `Synced` and `Healthy`.
 
-| App | Source |
+| App | Source Type / Path |
 |---|---|
-| hospital-traefik-app | `k8s/overlays/prod` |
-| redis | `k8s/redis` |
-| storage | `k8s/storage` |
-| kube-prometheus-stack | Helm chart |
-| monitoring-rules | `k8s/monitoring` |
-| loki | Helm chart |
-| promtail | Helm chart |
-| logging-config | `k8s/logging` |
-| kyverno | Helm chart |
-| security-namespace-policies | `k8s/security` |
-| external-secrets | Helm chart |
-| trivy-operator | Helm chart |
-| falco | Helm chart |
+| `namespaces` | `deploy/platform/namespaces` |
+| `traefik` | `deploy/platform/ingress/traefik` |
+| `hospital-redis-ha` | Helm Chart |
+| `kube-prometheus-stack` | Helm Chart |
+| `monitoring-config` | `deploy/platform/observability/monitoring` |
+| `loki` | Helm Chart |
+| `promtail` | Helm Chart |
+| `logging-config` | `deploy/platform/observability/logging` |
+| `kyverno` | Helm Chart |
+| `security-config` | `deploy/platform/security` |
+| `external-secrets` | Helm Chart |
+| `trivy-operator` | Helm Chart |
+| `falco` | Helm Chart |
+| `hospital-frontend-prod` | `deploy/workloads/hospital-frontend/overlays/prod` |
+| `hospital-backend-prod` | `deploy/workloads/hospital-backend/overlays/prod` |
 
 ## 9. Verify Workloads
 

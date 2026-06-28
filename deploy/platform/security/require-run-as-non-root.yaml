@@ -30,6 +30,7 @@ spec:
                 - argocd
                 - security
                 - logging
+                - local-path-storage
       validate:
         message: "Containers should run as a non-root user."
         anyPattern:

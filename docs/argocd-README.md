@@ -18,30 +18,33 @@ Argo CD is the desired-state controller for the cluster. Git is the source of tr
 ## Folder Responsibility
 
 ```text
-argocd/ = GitOps installation and sync definitions
-k8s/    = Kubernetes resources that run in the cluster
+deploy/argocd/    = GitOps installation and sync definitions (applications, projects, bootstrap)
+deploy/platform/  = Core infrastructure and platform configuration (ingress, monitoring, security, etc.)
+deploy/workloads/ = Application workload configurations (frontend, backend)
 ```
 
 Examples:
 
-| Argo CD path | What it does | Runtime path |
+| Argo CD application manifest path | What it does | Runtime / Config path |
 |---|---|---|
-| `hospital-traefik-app.yaml` | Syncs the hospital app. | `k8s/base` |
-| `security/10-kyverno-app.yaml` | Installs Kyverno from Helm. | `security` namespace |
-| `security/00-security-namespace-policies-app.yaml` | Syncs Kyverno policies. | `k8s/security` |
-| `monitoring/10-kube-prometheus-stack-app.yaml` | Installs Prometheus, Grafana, and Alertmanager from Helm. | `monitoring` namespace |
-| `monitoring/20-monitoring-rules-app.yaml` | Syncs Prometheus alert rules. | `k8s/monitoring` |
-| `logging/10-loki-app.yaml` | Installs Loki from Helm. | `logging` namespace |
-| `logging/20-promtail-app.yaml` | Installs Promtail from Helm. | `logging` namespace |
-| `logging/30-logging-config-app.yaml` | Syncs Loki datasource config. | `k8s/logging` |
+| `deploy/argocd/applications/workloads/hospital-frontend-prod.yaml` | Syncs the frontend app (production). | `deploy/workloads/hospital-frontend/overlays/prod` |
+| `deploy/argocd/applications/workloads/hospital-backend-prod.yaml` | Syncs the backend app (production). | `deploy/workloads/hospital-backend/overlays/prod` |
+| `deploy/argocd/applications/platform/traefik.yaml` | Installs Traefik Ingress Controller. | `deploy/platform/ingress/traefik` |
+| `deploy/argocd/applications/platform/kyverno.yaml` | Installs Kyverno policy engine from Helm. | `security` namespace |
+| `deploy/argocd/applications/platform/security-config.yaml` | Syncs Kyverno cluster policies & External Secrets. | `deploy/platform/security` |
+| `deploy/argocd/applications/platform/kube-prometheus-stack.yaml` | Installs Prometheus, Grafana, and Alertmanager from Helm. | `monitoring` namespace |
+| `deploy/argocd/applications/platform/monitoring-config.yaml` | Syncs Prometheus alert rules. | `deploy/platform/observability/monitoring` |
+| `deploy/argocd/applications/platform/loki.yaml` | Installs Loki log aggregator from Helm. | `logging` namespace |
+| `deploy/argocd/applications/platform/promtail.yaml` | Installs Promtail log shipper from Helm. | `logging` namespace |
+| `deploy/argocd/applications/platform/logging-config.yaml` | Syncs Loki datasource ConfigMap. | `deploy/platform/observability/logging` |
 
 ## Learning Map
 
 | Concept | Local example |
 |---|---|
-| App of apps mindset | Security, monitoring, and logging are represented as separate Argo CD Applications. |
-| Helm through Argo CD | `security/*-app.yaml`, `monitoring/10-kube-prometheus-stack-app.yaml`, and `logging/*-app.yaml`. |
-| Kustomize through Argo CD | `hospital-traefik-app.yaml`, `security-namespace-policies`, `monitoring-rules`, and `logging-config`. |
+| App of apps mindset | Security, monitoring, and logging are represented as separate Argo CD Applications, bootstraped by the Root App. |
+| Helm through Argo CD | `deploy/argocd/applications/platform/kyverno.yaml`, `.../kube-prometheus-stack.yaml`, and `.../loki.yaml`. |
+| Kustomize through Argo CD | `deploy/argocd/applications/workloads/*`, `.../security-config.yaml`, `.../monitoring-config.yaml`, and `.../logging-config.yaml`. |
 | Self-healing | Application specs use `syncPolicy.automated.selfHeal`. |
 | Drift control | Application specs use `syncPolicy.automated.prune`. |
 
@@ -49,36 +52,44 @@ Examples:
 
 ```mermaid
 flowchart LR
-    git[Git repository<br/>branch devops] --> app[Argo CD Application]
-    app --> path[k8s/overlays/prod]
+    git[Git repository<br/>branch main] --> app[Argo CD Application]
+    app --> path[deploy/workloads/...]
     path --> sync[Automated sync]
     sync --> ns1[namespace traefik]
     sync --> ns2[namespace hospital-prod]
     ns1 --> traefik[Traefik Gateway]
-    ns2 --> workloads[Frontend, backend, and Redis workloads]
+    ns2 --> workloads[Frontend, backend, and Redis HA workloads]
 ```
 
 ## Architecture With Security And Monitoring
 
 ```mermaid
 flowchart TB
-    git[Git repository<br/>branch devops] --> argocd[Argo CD<br/>namespace argocd]
+    git[Git repository<br/>branch main] --> argocd[Argo CD<br/>namespace argocd]
 
-    argocd --> app[hospital-traefik-app]
-    app --> appPath[k8s/overlays/prod]
-    appPath --> hospitalNs[namespace hospital-prod]
-    appPath --> traefikNs[namespace traefik]
+    argocd --> appFE[hospital-frontend-prod]
+    argocd --> appBE[hospital-backend-prod]
+    appFE --> fePath[deploy/workloads/hospital-frontend/overlays/prod]
+    appBE --> bePath[deploy/workloads/hospital-backend/overlays/prod]
+    fePath --> hospitalNs[namespace hospital-prod]
+    bePath --> hospitalNs
     hospitalNs --> fe[Frontend pods]
     hospitalNs --> be[Backend API pods]
-    hospitalNs --> redis[Redis DaemonSet pods]
+    
+    argocd --> redisApp[hospital-redis-ha app<br/>Helm chart]
+    redisApp --> hospitalNs
+    hospitalNs --> redis[Redis HA pods]
+
+    argocd --> traefikApp[traefik app]
+    traefikApp --> traefikNs[namespace traefik]
     traefikNs --> gateway[Traefik Gateway<br/>Gateway and HTTPRoute]
 
     argocd --> kyvernoApp[kyverno app<br/>Helm chart]
     argocd --> trivyApp[trivy-operator app<br/>Helm chart]
     argocd --> falcoApp[falco app<br/>Helm chart]
-    argocd --> policyApp[security-namespace-policies app]
+    argocd --> policyApp[security-config app]
     argocd --> promApp[kube-prometheus-stack app<br/>Helm chart]
-    argocd --> ruleApp[monitoring-rules app]
+    argocd --> ruleApp[monitoring-config app]
     argocd --> lokiApp[loki app<br/>Helm chart]
     argocd --> promtailApp[promtail app<br/>Helm chart]
     argocd --> loggingConfigApp[logging-config app]
@@ -86,7 +97,7 @@ flowchart TB
     kyvernoApp --> securityNs[namespace security]
     trivyApp --> securityNs
     falcoApp --> securityNs
-    policyApp --> securityPath[k8s/security]
+    policyApp --> securityPath[deploy/platform/security]
     securityPath --> securityNs
 
     securityNs --> kyverno[Kyverno<br/>admission policies]
@@ -94,14 +105,14 @@ flowchart TB
     securityNs --> falco[Falco<br/>runtime detection]
 
     promApp --> monitoringNs[namespace monitoring]
-    ruleApp --> monitoringPath[k8s/monitoring]
+    ruleApp --> monitoringPath[deploy/platform/observability/monitoring]
     monitoringPath --> monitoringNs
     monitoringNs --> prometheus[Prometheus<br/>metrics and rules]
     monitoringNs --> grafana[Grafana<br/>dashboards]
     monitoringNs --> alertmanager[Alertmanager<br/>alerts]
     lokiApp --> loggingNs[namespace logging]
     promtailApp --> loggingNs
-    loggingConfigApp --> loggingPath[k8s/logging]
+    loggingConfigApp --> loggingPath[deploy/platform/observability/logging]
     loggingPath --> monitoringNs
     loggingNs --> loki[Loki<br/>logs]
     loggingNs --> promtail[Promtail<br/>log shipper]
@@ -119,8 +130,8 @@ flowchart TB
 Runtime model:
 
 1. GitHub Actions updates image tags in Git after build and image scanning.
-2. Argo CD syncs the app manifests from `k8s/base` into the `hospital-prod` and `traefik` namespaces.
-3. Argo CD also installs the security tools from `argocd/security`.
+2. Argo CD syncs the app manifests from `deploy/workloads/.../base` into the `hospital-prod` and `traefik` namespaces using Kustomize overlays.
+3. Argo CD also installs the security tools from `deploy/argocd/applications/platform/`.
 4. Kyverno checks Kubernetes resources at admission time. Policies are currently in `Audit` mode.
 5. Trivy Operator scans live cluster workloads and produces vulnerability/config reports.
 6. Falco watches running containers and reports suspicious runtime behavior.
@@ -130,30 +141,31 @@ Runtime model:
 The important split is:
 
 ```text
-argocd/security, argocd/monitoring, and argocd/logging = install/manage tools
-k8s/security, k8s/monitoring, and k8s/logging          = configure those tools after they exist
+deploy/argocd/applications/platform/ = install/manage tools (helm charts)
+deploy/platform/                     = configure/customize those tools after they exist (policies, rules, datasources)
 ```
 
 ## Files
 
-| File | Purpose |
+| File/Folder | Purpose |
 |---|---|
-| `hospital-traefik-app.yaml` | Argo CD Application that syncs the Hospital Kubernetes stack from `k8s/base`. |
-| `security/` | Argo CD Applications that install security tools and sync security config from `k8s/security`. |
-| `monitoring/` | Argo CD Applications that install monitoring tools and sync monitoring config from `k8s/monitoring`. |
-| `logging/` | Argo CD Applications that install logging tools and sync logging config from `k8s/logging`. |
-| `SETUP.md` | Step-by-step Argo CD installation notes. |
+| `deploy/argocd/bootstrap/` | Root bootstrap application to deploy the whole stack. |
+| `deploy/argocd/applications/workloads/` | Argo CD Applications for environment-specific app workloads. |
+| `deploy/argocd/applications/platform/` | Argo CD Applications that install platform tools (Traefik, Prometheus, Loki, Kyverno, etc.). |
+| `deploy/platform/` | Cluster-wide platform runtime configuration (observability rules, namespaces, ingress routes). |
+| `deploy/workloads/` | Application workloads manifests (frontend, backend) organized by Kustomize. |
+| `argocd-SETUP.md` | Step-by-step Argo CD installation notes. |
 | `images/` | Documentation images. |
 
-## Application Configuration
+## Application Configuration (Root Bootstrap)
 
 | Setting | Value |
 |---|---|
 | Repository | `https://github.com/Kien-devops/k8s-home.git` |
-| Target revision | `devops` |
-| Manifest path | `k8s/overlays/prod` |
+| Target revision | `main` |
+| Manifest path | `deploy/argocd/bootstrap` |
 | Destination server | `https://kubernetes.default.svc` |
-| Destination namespace | `hospital-prod` |
+| Destination namespace | `argocd` |
 | Automated sync | Enabled |
 | Prune | Enabled |
 | Self-heal | Enabled |
@@ -178,50 +190,33 @@ sequenceDiagram
 ## Bootstrap Order
 
 ```mermaid
-flowchart LR
+flowchart TD
   k8s[On-Prem K8s ready] --> argo[Install Argo CD]
-  argo --> app[Apply hospital-traefik-app]
-  argo --> kyverno[Apply Kyverno app]
-  kyverno --> policies[Apply security policies app]
-  argo --> trivy[Apply Trivy Operator app]
-  argo --> falco[Apply Falco app]
-  argo --> prom[Apply kube-prometheus-stack app]
-  prom --> rules[Apply monitoring-rules app]
-  argo --> loki[Apply Loki app]
-  loki --> promtail[Apply Promtail app]
-  promtail --> logcfg[Apply logging-config app]
+  argo --> root[Apply root-app]
+  root --> platform[Platform Apps]
+  root --> workloads[Workload Apps]
+  platform --> traefik[traefik]
+  platform --> redis[hospital-redis-ha]
+  platform --> secrets[external-secrets]
+  platform --> kyverno[kyverno / security-config]
+  platform --> monitoring[kube-prometheus-stack / monitoring-config]
+  platform --> logging[loki / promtail / logging-config]
+  workloads --> fe[hospital-frontend-prod]
+  workloads --> be[hospital-backend-prod]
 ```
 
-## Apply the Application
+## Apply the Root Application
 
-Run on a host with cluster access:
+Run on a host with cluster access to bootstrap the entire stack:
 
 ```bash
-kubectl apply -f argocd/hospital-traefik-app.yaml
+kubectl apply -f deploy/argocd/bootstrap/root-app.yaml
 ```
 
-Apply the security Applications:
+Alternatively, apply the bootstrap kustomization directly:
 
 ```bash
-kubectl apply -f argocd/security/10-kyverno-app.yaml
-kubectl apply -f argocd/security/00-security-namespace-policies-app.yaml
-kubectl apply -f argocd/security/20-trivy-operator-app.yaml
-kubectl apply -f argocd/security/30-falco-app.yaml
-```
-
-Apply the monitoring Applications:
-
-```bash
-kubectl apply -f argocd/monitoring/10-kube-prometheus-stack-app.yaml
-kubectl apply -f argocd/monitoring/20-monitoring-rules-app.yaml
-```
-
-Apply the logging Applications:
-
-```bash
-kubectl apply -f argocd/logging/10-loki-app.yaml
-kubectl apply -f argocd/logging/20-promtail-app.yaml
-kubectl apply -f argocd/logging/30-logging-config-app.yaml
+kubectl apply -k deploy/argocd/bootstrap/
 ```
 
 ## Access the Argo CD UI
@@ -249,13 +244,13 @@ echo
 
 ```bash
 kubectl -n argocd get applications
-kubectl -n argocd describe application hospital-traefik-app
-kubectl -n argocd get application kyverno trivy-operator falco security-namespace-policies
-kubectl -n argocd get application kube-prometheus-stack monitoring-rules
+kubectl -n argocd describe application hospital-frontend-prod
+kubectl -n argocd get application kyverno trivy-operator falco security-config
+kubectl -n argocd get application kube-prometheus-stack monitoring-config
 kubectl -n argocd get application loki promtail logging-config
-kubectl get pods,daemonset -n hospital-prod
+kubectl get pods -n hospital-prod
 kubectl get pods -n traefik
-  kubectl get pods -n security
+kubectl get pods -n security
 kubectl get pods -n monitoring
 kubectl get pods -n logging
 kubectl get clusterpolicy
@@ -276,11 +271,18 @@ Open:
 http://localhost:3000
 ```
 
+To fetch the auto-generated Grafana admin password (default credentials are user `admin` and password `prom-operator` unless changed):
+
+```bash
+kubectl get secret -n monitoring kube-prometheus-stack-grafana -o jsonpath="{.data.admin-password}" | base64 -d
+echo
+```
+
 If you use the Argo CD CLI:
 
 ```bash
-argocd app get hospital-traefik-app
-argocd app sync hospital-traefik-app
+argocd app get hospital-frontend-prod
+argocd app sync hospital-frontend-prod
 ```
 
 ## Operational Notes
@@ -288,7 +290,7 @@ argocd app sync hospital-traefik-app
 | Topic | Guidance |
 |---|---|
 | Manual edits | Avoid `kubectl edit` for managed resources. Commit the change to Git instead. |
-| Runtime secrets | Secrets such as `be-db-secret`, `redis-auth-secret`, and `nexus-registry-secret` are securely managed via AWS Secrets Manager and synced by External Secrets Operator (ESO). |
+| Runtime secrets | Secrets such as `be-db-secret`, `redis-auth-secret`, and `nexus-registry-secret` are securely managed via HashiCorp Vault and synced into the cluster namespaces by External Secrets Operator (ESO). |
 | Image deployment | GitHub Actions updates image tags in Git, then Argo CD syncs. |
 | Drift | Self-heal will bring live resources back to Git state. |
 | Prune | Deleted manifests can delete live resources during sync. Review changes carefully. |

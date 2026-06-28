@@ -3,3 +3,8 @@ kind: Kustomization
 resources:
   - rules/hospital-workload-alerts.yaml
   - grafana-gateway-route.yaml
+  - grafana-db-serviceaccount.yaml
+  - grafana-db-secretstore.yaml
+  - grafana-db-externalsecret.yaml
+  - grafana-db-pvc.yaml
+  - grafana-db-deployment.yaml

@@ -79,58 +79,49 @@ sudo systemctl restart crio
 
 Kustomize overlays are split by environment:
 
-| Environment | Path | Namespace |
+| Environment | Overlay Path | Namespace |
 |---|---|---|
-| prod | `k8s/overlays/prod` | `hospital-prod` |
+| dev | `deploy/workloads/hospital-*/overlays/dev` | `hospital-dev` |
+| stag | `deploy/workloads/hospital-*/overlays/stag` | `hospital-stag` |
+| prod | `deploy/workloads/hospital-*/overlays/prod` | `hospital-prod` |
 
 ## 8. Configure Enterprise Secrets Management
 
-To maintain security and GitOps compliance, secrets are not created manually via `kubectl`. Instead, we use **AWS Secrets Manager** as the central authority, and the **External Secrets Operator (ESO)** synchronizes them to the cluster.
+To maintain security and GitOps compliance, secrets are not created manually via `kubectl` or committed to Git. Instead, we use **HashiCorp Vault** as the central authority, and the **External Secrets Operator (ESO)** synchronizes them to the cluster.
 
-### A. Create Secrets in AWS Secrets Manager
+### A. Create Secrets in HashiCorp Vault
 
-Execute the following commands to create the 5 required credentials in your AWS environment.
+Execute the following commands (or use the Vault UI/API) to create the 5 required secrets under the `secret/` path (KV v2 engine) on your Vault server.
 
 ```bash
+# Enable the KV version 2 secrets engine at path secret (if not already enabled)
+vault secrets enable -path=secret kv-v2
+
 # 1. Database connection string
-aws secretsmanager create-secret \
-  --name hospital-be-db \
-  --description "Database Connection String" \
-  --secret-string '{"default-connection":"Server=<DB_IP>;Database=HospitalDB;User Id=sa;Password=<DB_PASSWORD>;TrustServerCertificate=True"}' \
-  --region us-east-1
+vault kv put secret/hospital/be-db \
+  default-connection="Server=<DB_IP>;Database=HospitalDB;User Id=sa;Password=<DB_PASSWORD>;TrustServerCertificate=True"
 
 # 2. Redis password for backend
-aws secretsmanager create-secret \
-  --name hospital-be-redis \
-  --description "Redis password for backend" \
-  --secret-string '{"password":"<REDIS_PASSWORD>"}' \
-  --region us-east-1
+vault kv put secret/hospital/be-redis \
+  password="<REDIS_PASSWORD>"
 
 # 3. JWT signing key
-aws secretsmanager create-secret \
-  --name hospital-be-jwt \
-  --description "JWT signing key" \
-  --secret-string '{"secret":"<JWT_SECRET>"}' \
-  --region us-east-1
+vault kv put secret/hospital/be-jwt \
+  secret="<JWT_SECRET>"
 
-# 4. Redis auth (used by the Redis HA Helm chart)
-aws secretsmanager create-secret \
-  --name hospital-redis-auth \
-  --description "Redis HA auth" \
-  --secret-string '{"password":"<REDIS_PASSWORD>"}' \
-  --region us-east-1
+# 4. Redis HA auth (used by the Redis HA Helm chart)
+vault kv put secret/hospital/redis-auth \
+  password="<REDIS_PASSWORD>"
 
 # 5. Nexus image pull credentials
-aws secretsmanager create-secret \
-  --name hospital-nexus-registry \
-  --description "Nexus Docker Registry credentials for K8s ImagePullSecrets" \
-  --secret-string '{"username":"admin","password":"<NEXUS_PASSWORD>"}' \
-  --region us-east-1
+vault kv put secret/hospital/nexus-registry \
+  username="admin" \
+  password="<NEXUS_PASSWORD>"
 ```
 
 ### B. Sync via External Secrets Operator
 
-When you deploy your application (via ArgoCD or Kustomize), the `ExternalSecret` custom resources will automatically be applied. ESO will pull these AWS secrets and generate the necessary Kubernetes `Secret` resources.
+When you deploy your application (via ArgoCD or Kustomize), the `ExternalSecret` custom resources will automatically be applied. ESO will pull these Vault secrets and generate the corresponding Kubernetes `Secret` resources in the workloads namespace.
 
 Verify that the secrets have successfully synchronized:
 
@@ -144,7 +135,7 @@ Look for `SecretSynced = True` under the STATUS column for all 5 secrets.
 Redis is installed by Argo CD from the Bitnami Redis Helm chart:
 
 ```bash
-kubectl apply -f argocd/hospital-redis-ha-app.yaml
+kubectl apply -f deploy/argocd/applications/platform/hospital-redis-ha-app.yaml
 ```
 
 The production backend connects to:
@@ -153,21 +144,24 @@ The production backend connects to:
 hospital-redis-ha:6379
 ```
 
-Persistence is disabled for this cache-only Redis deployment, so no worker-node
-data directory is required.
+Persistence is disabled for this cache-only Redis deployment, so no worker-node data directory is required.
 
-## 10. Deploy
+## 10. Deploy (Fallback / Testing without ArgoCD)
 
 ```bash
-# Traefik ingress
-kubectl apply -k onprem/traefik
-kubectl apply -f onprem/traefik/10-app-gateway-routes.example.yaml
+# Platform Namespaces
+kubectl apply -k deploy/platform/namespaces
 
-# Hospital app
-kubectl apply -k k8s/overlays/prod
+# Traefik ingress
+kubectl apply -k deploy/platform/ingress/traefik
+kubectl apply -f deploy/platform/ingress/traefik/app-gateway-routes.example.yaml
 
 # Redis HA cache
-kubectl apply -f argocd/hospital-redis-ha-app.yaml
+kubectl apply -f deploy/argocd/applications/platform/hospital-redis-ha-app.yaml
+
+# Hospital app workloads
+kubectl apply -k deploy/workloads/hospital-frontend/overlays/prod
+kubectl apply -k deploy/workloads/hospital-backend/overlays/prod
 ```
 
 ## 11. Verify
@@ -181,9 +175,10 @@ kubectl get pods -n traefik
 ## 12. Remove
 
 ```bash
-kubectl delete -k k8s/overlays/prod
-kubectl delete -f argocd/hospital-redis-ha-app.yaml
-kubectl delete -k onprem/traefik
+kubectl delete -k deploy/workloads/hospital-frontend/overlays/prod
+kubectl delete -k deploy/workloads/hospital-backend/overlays/prod
+kubectl delete -f deploy/argocd/applications/platform/hospital-redis-ha-app.yaml
+kubectl delete -k deploy/platform/ingress/traefik
 ```
 
 ## Troubleshooting
@@ -191,7 +186,7 @@ kubectl delete -k onprem/traefik
 | Symptom | Fix |
 |---|---|
 | Calico cross-node DNS timeout | `kubectl set env ds/calico-node -n kube-system IP_AUTODETECTION_METHOD="cidr=192.168.1.0/24"` |
-| Backend Redis timeout to `hospital-redis-ha-haproxy:6379` | Set `ConnectionStrings__Redis` to `hospital-redis-ha:6379,password=$(REDIS_PASSWORD),abortConnect=false` and restart backend |
+| Backend Redis timeout to `hospital-redis-ha:6379` | Set `ConnectionStrings__Redis` to `hospital-redis-ha:6379,password=$(REDIS_PASSWORD),abortConnect=false` and restart backend |
 | BE `CreateContainerConfigError` | Verify all secrets exist: `kubectl get secrets -n hospital-prod` |
 | BE `ImagePullBackOff` | Verify `nexus-registry-secret` exists and CRI-O insecure registry is configured |
 | Metrics Server crash | Patch with `--kubelet-insecure-tls` for bare-metal |
