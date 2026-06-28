@@ -13,20 +13,9 @@ spec:
       labels:
         app: grafana-db
     spec:
-      securityContext:
-        runAsNonRoot: true
-        runAsUser: 999
-        fsGroup: 999
       containers:
         - name: postgres
           image: postgres:16-alpine
-          securityContext:
-            allowPrivilegeEscalation: false
-            capabilities:
-              drop:
-                - ALL
-            runAsNonRoot: true
-            runAsUser: 999
           resources:
             requests:
               cpu: 100m
