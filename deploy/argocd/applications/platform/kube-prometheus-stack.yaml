@@ -21,12 +21,11 @@ spec:
           enabled: true
           replicaCount: 3
           defaultDashboardsEnabled: true
-          extraEnv:
-            - name: GF_DATABASE_PASSWORD
-              valueFrom:
-                secretKeyRef:
-                  name: grafana-db-secret
-                  key: password
+          envValueFrom:
+            GF_DATABASE_PASSWORD:
+              secretKeyRef:
+                name: grafana-db-secret
+                key: password
           grafana.ini:
             database:
               type: postgres
